@@ -1,0 +1,6 @@
+{
+  "name": "ניהול משימות לילדים",
+  "description": "אפליקציית טאבלט לניהול משימות לילדים: ערבה, חושן, פאר ורפאל, עם אינטגרציית משוב, בקרת הורים ופתיחת קוד Wi-Fi יומי",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
