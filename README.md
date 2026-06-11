@@ -1,20 +1,86 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 📋 אפליקציית ניהול משימות לילדים
 
-# Run and deploy your AI Studio app
+אפליקציה לניהול משימות יומיות לילדים על טאבלט בבית. מותאמת לעברית (RTL), עם תמיכה במסך מגע ותצוגת 4 עמודות - ילד אחד בכל עמודה.
 
-This contains everything you need to run your app locally.
+## ✨ תכונות
 
-View your app in AI Studio: https://ai.studio/apps/ca12f097-169d-456a-9ed9-275533c1b8b9
+- ✅ **משימות לפי שעה** - בוקר, צהריים, ערב (מתחלף אוטומטית לפי השעון)
+- 🕯️ **משימות יום שישי** - הכנות לשבת מיוחדות
+- 🎮 **תגמול זמן מסך** - משימות חובה = דקות מסך
+- 😊 **מערכת סמיילים** - 10 סמיילים = מתנה מאבא ואמא
+- 🎉 **חגיגה** - אנימציה כשמסיימים את כל משימות הערב
+- 📸 **הוכחה בצילום** - משימות שדורשות תמונה מהמצלמה
+- 🔊 **הקראה קולית** - לילדים קטנים שלא יודעים לקרוא
+- 🔒 **לוח בקרה להורים** - מוגן בסיסמה, ניהול משימות וסמיילים
+- 🖥️ **נעילת מסך** - טיימר שנועל את המחשב אוטומטית
 
-## Run Locally
+## 🚀 התקנה מהירה
 
-**Prerequisites:**  Node.js
+### דרישות מוקדמות
+- [Node.js](https://nodejs.org/) (גרסה 18+)
 
+### שלב 1: התקנה
+```bash
+git clone https://github.com/hallel34/kids-task-manager.git
+cd kids-task-manager
+npm install
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### שלב 2: התאמה אישית
+ערכו את הקובץ `src/App.tsx` ושנו:
+
+```typescript
+// שנו את הפרטים למשפחה שלכם
+const CHILDREN: Child[] = [
+  { id: 'child1', name: 'השם של הילד/ה', age: 12, gender: 'female', initial: 'א', color: '#5D4037', avatarEmoji: '👧', photo: '/photos/child1.jpg' },
+  { id: 'child2', name: 'השם של הילד/ה', age: 9, gender: 'male', initial: 'ב', color: '#D35400', avatarEmoji: '👦', photo: '/photos/child2.jpg' },
+];
+```
+
+- **תמונות**: שימו תמונות של הילדים בתיקיית `public/photos/`
+- **סיסמת הורים**: חפשו `parentPin ===` ושנו את הסיסמה
+- **זמני בית ספר**: עדכנו את `SCHOOL_SCHEDULE`
+- **זמני מסך**: עדכנו את `SCREEN_TIME_REWARD`
+
+### שלב 3: הרצה מקומית
+```bash
+npm run dev
+```
+פתחו בדפדפן: `http://localhost:3000`
+
+### שלב 4: העלאה לענן (Vercel - חינמי)
+```bash
+npm run build
+npx vercel deploy --prod
+```
+ככה האפליקציה עובדת מכל מכשיר בלי שהמחשב דלוק.
+
+## 📱 התקנה על טאבלט
+
+1. פתחו **Chrome** בטאבלט וגשו לכתובת
+2. לחצו ⋮ → **"הוסף למסך הבית"**
+3. פתחו מהאייקון - נפתח בלי סרגל כתובות
+4. הפעילו **נעיצת מסך** (Screen Pinning) בהגדרות הטאבלט
+
+## 🔧 שרת נעילת מסך (אופציונלי)
+
+אם רוצים שהמחשב יינעל אוטומטית אחרי זמן מסך:
+```bash
+npm run lock-server
+```
+זה מפעיל שרת מקומי שנועל את Windows כשהטיימר נגמר.
+
+## 📁 מבנה הפרויקט
+
+```
+src/App.tsx          - האפליקציה הראשית (כאן משנים הכל)
+server/lock-server.ts - שרת נעילת מסך
+serve.ts             - שרת production
+api/tts.ts           - שרת הקראה קולית
+public/photos/       - תמונות הילדים
+public/manifest.json - הגדרות PWA
+```
+
+## 📄 רישיון
+
+MIT - חופשי לשימוש, שינוי והפצה.
