@@ -69,6 +69,7 @@ export interface Child {
   id: string;
   name: string;
   age: number;
+  gender: 'male' | 'female';
   initial: string;
   color: string;
   avatarEmoji: string;
@@ -76,28 +77,27 @@ export interface Child {
 }
 
 // ================= DATA CONSTANTS =================
+// ================= CUSTOMIZE YOUR FAMILY HERE =================
+// שנו את הפרטים הבאים למשפחה שלכם!
 const CHILDREN: Child[] = [
-  { id: 'arava', name: 'ערבה', age: 13, initial: 'ע', color: '#5D4037', avatarEmoji: '👧', photo: '/photos/arava.jpg' },
-  { id: 'hoshen', name: 'חושן', age: 10, initial: 'ח', color: '#D35400', avatarEmoji: '👧', photo: '/photos/hoshen.jpg' },
-  { id: 'peer', name: 'פאר', age: 7, initial: 'פ', color: '#6A7B42', avatarEmoji: '👦', photo: '/photos/peer.jpg' },
-  { id: 'rafael', name: 'רפאל', age: 5, initial: 'ר', color: '#8A9A5B', avatarEmoji: '👦', photo: '/photos/rafael.jpg' },
+  { id: 'child1', name: 'ילד/ה 1', age: 12, gender: 'female', initial: 'א', color: '#5D4037', avatarEmoji: '👧', photo: '' },
+  { id: 'child2', name: 'ילד/ה 2', age: 9, gender: 'male', initial: 'ב', color: '#D35400', avatarEmoji: '👦', photo: '' },
+  { id: 'child3', name: 'ילד/ה 3', age: 6, gender: 'male', initial: 'ג', color: '#6A7B42', avatarEmoji: '👦', photo: '' },
 ];
 
 // Screen time reward (in minutes) per child for completing all mandatory tasks
 // Bonus minutes for each optional task completed
 const SCREEN_TIME_REWARD: Record<string, { base: number; bonusPerOptional: number }> = {
-  arava: { base: 60, bonusPerOptional: 5 },
-  hoshen: { base: 45, bonusPerOptional: 5 },
-  peer: { base: 30, bonusPerOptional: 5 },
-  rafael: { base: 20, bonusPerOptional: 3 },
+  child1: { base: 60, bonusPerOptional: 5 },
+  child2: { base: 45, bonusPerOptional: 5 },
+  child3: { base: 30, bonusPerOptional: 5 },
 };
 
 // School schedule info
 const SCHOOL_SCHEDULE: Record<string, { regular: string; tuesday: string }> = {
-  arava: { regular: '15:45', tuesday: '13:45' },
-  hoshen: { regular: '14:30', tuesday: '12:30' },
-  peer: { regular: '14:30', tuesday: '12:30' },
-  rafael: { regular: '16:00', tuesday: '16:00' },
+  child1: { regular: '15:30', tuesday: '13:30' },
+  child2: { regular: '14:30', tuesday: '12:30' },
+  child3: { regular: '14:00', tuesday: '14:00' },
 };
 
 function getSchoolEndTime(childId: string): string {
@@ -109,119 +109,55 @@ function getSchoolEndTime(childId: string): string {
 
 // Helper to construct personalized task list for each child based on age
 function getInitialTasksForChild(childId: string): Task[] {
-  switch (childId) {
-    case 'arava': // ערבה, 13, responsible teenager
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'הכנת תיק לבית ספר', emoji: '🎒', completed: false, mandatory: true },
-        { id: 'm3', time: 'morning', title: 'התלבשות והתארגנות', emoji: '👕', completed: false, mandatory: true },
-        { id: 'm4', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm5', time: 'morning', title: 'נטילת ידיים וברכות', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm6', time: 'morning', title: 'הוצאת הכלב לטיול בוקר', emoji: '🐕', completed: false, mandatory: true },
-        { id: 'm7', time: 'morning', title: 'סידור המיטה והחדר', emoji: '🛏️', completed: false, mandatory: true, requiresPhoto: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'הכנת שיעורי בית (משוב) 📚', emoji: '📝', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a2', time: 'afternoon', title: 'הוצאת קופסאות אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a3', time: 'afternoon', title: 'הכנסת כלים למדיח', emoji: '🍽️', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'תליית כביסה רטובה', emoji: '👕', completed: false, mandatory: true },
-        { id: 'a5', time: 'afternoon', title: 'קיפול כביסה יבשה', emoji: '🧺', completed: false, mandatory: true },
-        { id: 'a6', time: 'afternoon', title: 'החזרת בגדים מסודרים לארון', emoji: '🚪', completed: false, mandatory: false, requiresPhoto: true },
-        { id: 'a7', time: 'afternoon', title: 'הכנסת מכונת כביסה (במידה ויש)', emoji: '🧺', completed: false, mandatory: false },
-        { id: 'a8', time: 'afternoon', title: 'עזרה באחים הקטנים', emoji: '👶', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי כלים מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'הכנסת כלים למדיח וניקוי שולחן', emoji: '🍽️', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e4', time: 'evening', title: 'צחצוח שיניים של לילה', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e5', time: 'evening', title: 'התלבשות פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e6', time: 'evening', title: 'הוצאת הכלב לטיול לילה', emoji: '🐕', completed: false, mandatory: true },
-        { id: 'e7', time: 'evening', title: 'האכלת הכלב ארוחת לילה', emoji: '🦴', completed: false, mandatory: false },
-      ];
+  const child = CHILDREN.find(c => c.id === childId);
+  const age = child?.age || 7;
+  const isOlder = age >= 10;
+  const isYoungest = age <= 5;
 
-    case 'hoshen': // חושן, 10
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'התלבשות עצמאית', emoji: '👕', completed: false, mandatory: true },
-        { id: 'm3', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm4', time: 'morning', title: 'נטילת ידיים וברכות', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm5', time: 'morning', title: 'סידור המיטה', emoji: '🛏️', completed: false, mandatory: true },
-        { id: 'm6', time: 'morning', title: 'הכנת תיק לבית ספר', emoji: '🎒', completed: false, mandatory: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'הוצאת הכלב לטיול צהריים', emoji: '🐕', completed: false, mandatory: true },
-        { id: 'a2', time: 'afternoon', title: 'הכנת שיעורי בית (משוב) 📚', emoji: '📝', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a3', time: 'afternoon', title: 'הוצאת קופסאות אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'הכנסת כלים למדיח', emoji: '🍽️', completed: false, mandatory: true },
-        { id: 'a5', time: 'afternoon', title: 'האכלת הכלב', emoji: '🦴', completed: false, mandatory: false },
-        { id: 'a6', time: 'afternoon', title: 'משחק עם הכלב בחצר ⚽', emoji: '🥎', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי כלים מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'ריקון המדיח (לפי בקשה)', emoji: '🥛', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e4', time: 'evening', title: 'צחצוח שיניים של לילה', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e5', time: 'evening', title: 'התלבשות פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e6', time: 'evening', title: 'הוצאת הכלב לטיול לילה', emoji: '🐕', completed: false, mandatory: true },
-      ];
+  const tasks: Task[] = [
+    // Morning
+    { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
+    { id: 'm2', time: 'morning', title: 'התלבשות', emoji: '👕', completed: false, mandatory: true },
+    { id: 'm3', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
+    { id: 'm4', time: 'morning', title: 'נטילת ידיים', emoji: '💧', completed: false, mandatory: true },
+    { id: 'm5', time: 'morning', title: 'סידור המיטה', emoji: '🛏️', completed: false, mandatory: true },
+    // Afternoon
+    { id: 'a1', time: 'afternoon', title: isYoungest ? 'ציור או יצירה 🎨' : 'הכנת שיעורי בית 📚', emoji: '📝', completed: false, mandatory: !isYoungest, requiresPhoto: true },
+    { id: 'a2', time: 'afternoon', title: 'הוצאת קופסאות אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
+    { id: 'a3', time: 'afternoon', title: 'סידור החדר', emoji: '🧹', completed: false, mandatory: true, requiresPhoto: true },
+    // Evening
+    { id: 'e1', time: 'evening', title: 'פינוי כלים מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
+    { id: 'e2', time: 'evening', title: 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
+    { id: 'e3', time: 'evening', title: 'צחצוח שיניים של לילה', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
+    { id: 'e4', time: 'evening', title: 'לבישת פיג׳מה', emoji: '💤', completed: false, mandatory: true },
+  ];
 
-    case 'peer': // פאר, 7
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'התלבשות עצמאית', emoji: '👕', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm3', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm4', time: 'morning', title: 'נטילת ידיים וברכות', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm5', time: 'morning', title: 'סידור המיטה', emoji: '🛏️', completed: false, mandatory: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'הכנת שיעורי בית 📚', emoji: '📝', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a2', time: 'afternoon', title: 'הוצאת קופסאות אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a3', time: 'afternoon', title: 'פינוי והוצאת כלים נקיים מהמדיח', emoji: '🥛', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'האכלת הכלב וקערית מים', emoji: '🦴', completed: false, mandatory: false },
-        { id: 'a5', time: 'afternoon', title: 'משחק עם הכלב בחצר ⚽', emoji: '🥎', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי הכלים מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'צחצוח שיניים של לילה', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e4', time: 'evening', title: 'התלבשות פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e5', time: 'evening', title: 'סידור הצעצועים לפני שינה', emoji: '🧸', completed: false, mandatory: true, requiresPhoto: true },
-      ];
-
-    case 'rafael': // רפאל, 5, גן
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'לבישת כיפה', emoji: '🧢', completed: false, mandatory: true },
-        { id: 'm3', time: 'morning', title: 'נטילת ידיים וברכות בוקר', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm4', time: 'morning', title: 'התלבשות (עם עזרה)', emoji: '👕', completed: false, mandatory: true },
-        { id: 'm5', time: 'morning', title: 'נעילת נעליים לבד', emoji: '👟', completed: false, mandatory: true },
-        { id: 'm6', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm7', time: 'morning', title: 'אכילת ארוחת בוקר', emoji: '🥣', completed: false, mandatory: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'חליצת נעליים ושמירה במקום', emoji: '👟', completed: false, mandatory: true },
-        { id: 'a2', time: 'afternoon', title: 'הוצאת קופסת אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a3', time: 'afternoon', title: 'דפי ציור או יצירה 🎨', emoji: '🖍️', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'האכלת הכלב וקערית מים', emoji: '🦴', completed: false, mandatory: true },
-        { id: 'a5', time: 'afternoon', title: 'סידור הצעצועים', emoji: '🧸', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a6', time: 'afternoon', title: 'משחק עם הכלב', emoji: '🐕', completed: false, mandatory: false },
-        { id: 'a7', time: 'afternoon', title: 'עזרה לשים כלים בכיור', emoji: '🍽️', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי הצלחת מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'מקלחת (עם עזרה)', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e4', time: 'evening', title: 'לבישת פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e5', time: 'evening', title: 'סידור הצעצועים לפני שינה', emoji: '🧸', completed: false, mandatory: false },
-        { id: 'e6', time: 'evening', title: 'אמירת שמע ישראל', emoji: '🌙', completed: false, mandatory: true },
-      ];
-
-    default:
-      return [];
+  // Older kids get extra responsibilities
+  if (isOlder) {
+    tasks.push(
+      { id: 'a4', time: 'afternoon', title: 'הכנסת כלים למדיח', emoji: '🍽️', completed: false, mandatory: true },
+      { id: 'a5', time: 'afternoon', title: 'כביסה (קיפול/תליה)', emoji: '🧺', completed: false, mandatory: false },
+      { id: 'e5', time: 'evening', title: 'ניקוי שולחן', emoji: '🍽️', completed: false, mandatory: true },
+    );
   }
+
+  // Youngest get simpler bonus tasks
+  if (isYoungest) {
+    tasks.push(
+      { id: 'a6', time: 'afternoon', title: 'סידור הצעצועים', emoji: '🧸', completed: false, mandatory: true, requiresPhoto: true },
+      { id: 'e5', time: 'evening', title: 'סידור צעצועים לפני שינה', emoji: '🧸', completed: false, mandatory: false },
+    );
+  }
+
+  return tasks;
 }
 
 // Friday (Erev Shabbat) special tasks - replace afternoon tasks
 function getFridayTasksForChild(childId: string): Task[] {
-  const isOlder = childId === 'arava' || childId === 'hoshen';
-  const isYoungest = childId === 'rafael';
+  const child = CHILDREN.find(c => c.id === childId);
+  const age = child?.age || 7;
+  const isOlder = age >= 10;
+  const isYoungest = age <= 5;
 
   // Keep morning tasks as usual, but replace afternoon with Friday chores
   const morningTasks = getInitialTasksForChild(childId).filter(t => t.time === 'morning');
@@ -287,7 +223,7 @@ function getEarnedScreenTime(childId: string, childTasks: Task[]): { earned: num
 
 export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('child');
-  const [activeChildId, setActiveChildId] = useState<string>('rafael');
+  const [activeChildId, setActiveChildId] = useState<string>(CHILDREN[0]?.id || 'child1');
   const [parentPin, setParentPin] = useState<string>('');
   const [parentPinError, setParentPinError] = useState<boolean>(false);
   const [isParentAuthenticated, setIsParentAuthenticated] = useState<boolean>(false);
@@ -360,12 +296,9 @@ export default function App() {
   }, [celebrationShown]);
 
   const [tasks, setTasks] = useState<Record<string, Task[]>>(() => {
-    return {
-      rafael: getTasksForToday('rafael'),
-      arava: getTasksForToday('arava'),
-      hoshen: getTasksForToday('hoshen'),
-      peer: getTasksForToday('peer'),
-    };
+    const t: Record<string, Task[]> = {};
+    CHILDREN.forEach(c => { t[c.id] = getTasksForToday(c.id); });
+    return t;
   });
 
   const [currentDate, setCurrentDate] = useState<string>('');
@@ -404,7 +337,7 @@ export default function App() {
 
   const handleTaskClick = (childId: string, taskId: string) => {
     // For Rafael - read aloud on click (must be FIRST, directly in click handler for Android)
-    if (childId === 'rafael') {
+    if (CHILDREN.find(c => c.id === childId)?.age <= 6) {
       const task = (tasks[childId] || []).find(t => t.id === taskId);
       if (task) speakTask(task.title);
     }
@@ -485,7 +418,7 @@ export default function App() {
         const updated = { ...prev };
         Object.keys(updated).forEach(childKey => {
           updated[childKey] = updated[childKey].map(task => {
-            if (task.id === 'a3' && childKey !== 'rafael') {
+            if (task.id === 'a3' && (CHILDREN.find(c => c.id === childKey)?.age || 0) > 5) {
               return { 
                 ...task, 
                 completed: false, 
@@ -792,8 +725,7 @@ export default function App() {
 
   const handleParentAuth = (e: React.FormEvent) => {
     e.preventDefault();
-    // Change this PIN to your own! Default: 1234
-    if (parentPin === '1234') {
+    if (parentPin === 'Rl12072021!@') {
       setIsParentAuthenticated(true);
       setParentPinError(false);
       setViewMode('parent');
@@ -893,7 +825,7 @@ export default function App() {
                   <div className="flex items-center gap-1.5">
                     <span className="text-lg font-bold text-[#4A4540]">{activeChild.name}</span>
                   </div>
-                  <p className="text-xs text-[#8C8479]">{activeChildId === 'arava' || activeChildId === 'hoshen' ? 'בת' : 'בן'} {activeChild.age} | {getDayName()}</p>
+                  <p className="text-xs text-[#8C8479]">{activeChild.gender === 'female' ? 'בת' : 'בן'} {activeChild.age} | {getDayName()}</p>
                 </div>
               </div>
 
@@ -939,7 +871,7 @@ export default function App() {
               <div className="text-xs bg-white/70 p-2 rounded border border-[#E3DCD2]">
                 <strong className="text-xs block text-[#D35400]">שיעורי בית ל{activeChild.name}:</strong>
                 <p className="text-[11px] italic mt-0.5">
-                  {activeChildId === 'rafael' 
+                  {activeChild.age <= 5 
                     ? 'פטור מגיל גן! יש להכין יצירה 🎨' 
                     : mashovHasHomeworkText[activeChildId] || 'אין שיעורי בית היום 😊'}
                 </p>
@@ -996,7 +928,7 @@ export default function App() {
             {/* Help Block */}
             <div className="p-4 bg-[#8A9A5B]/10 rounded-2xl border border-[#8A9A5B]/20 text-center text-xs space-y-2">
               <p className="text-[#6A7B42] mb-0.5 font-bold">צריך עזרה עם המשימות?</p>
-              <p className="text-[#8A9A5B] text-[10px]">קראו לאבא הלל או אמא מוריה</p>
+              <p className="text-[#8A9A5B] text-[10px]">קראו לאבא או אמא</p>
               <button
                 onClick={() => {
                   const audio = new Audio('/api/tts?text=' + encodeURIComponent('שלום רפאל, בדיקה אחת שתיים שלוש'));
@@ -1018,7 +950,7 @@ export default function App() {
                 <ShieldCheck className="w-5 h-5 shrink-0" />
                 <div>
                   <h4 className="text-xs font-bold">מורשה הורים: מחובר</h4>
-                  <p className="text-[10px] opacity-90">שלום אבא הלל / אמא מוריה</p>
+                  <p className="text-[10px] opacity-90">שלום להורים</p>
                 </div>
               </div>
 
@@ -1136,12 +1068,9 @@ export default function App() {
             <button
               onClick={() => {
                 if (window.confirm('האם ברצונך לאפס את המשימות של כל הילדים להתחלה?')) {
-                  setTasks({
-                    rafael: getTasksForToday('rafael'),
-                    arava: getTasksForToday('arava'),
-                    hoshen: getTasksForToday('hoshen'),
-                    peer: getTasksForToday('peer'),
-                  });
+                  const t: Record<string, Task[]> = {};
+                  CHILDREN.forEach(c => { t[c.id] = getTasksForToday(c.id); });
+                  setTasks(t);
                 }
               }}
               className="p-2 border border-[#D6CFC4] rounded-lg bg-white text-xs hover:bg-[#F2EDE4] text-[#8C8479] flex items-center gap-1.5 transition-all"
@@ -1220,7 +1149,7 @@ export default function App() {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-bold text-sm text-[#4A4540] truncate">{child.name}</h3>
                           <p className="text-[10px] text-[#8C8479]">
-                            {child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {child.age}
+                            {child.gender === 'female' ? 'בת' : 'בן'} {child.age}
                           </p>
                         </div>
                         <div className="text-center shrink-0">
@@ -1281,7 +1210,7 @@ export default function App() {
                                   {task.photo && (
                                     <span className="text-[8px] font-bold text-green-600 bg-green-50 px-1 py-0.5 rounded">✓📸</span>
                                   )}
-                                  {child.id === 'rafael' && (
+                                  {child.age <= 6 && (
                                     <span className="text-[8px] font-bold text-blue-600 bg-blue-50 px-1 py-0.5 rounded">🔊</span>
                                   )}
                                 </div>
@@ -1344,7 +1273,7 @@ export default function App() {
                   
                   <div>
                     <h3 className="text-xl font-bold text-[#5D4037]">לוח בקרה למבוגרים בלבד</h3>
-                    <p className="text-xs text-[#8C8479] mt-1">אבא הלל ואמא מוריה - נא להקיש את קוד האימות שלכם</p>
+                    <p className="text-xs text-[#8C8479] mt-1">נא להקיש את קוד האימות</p>
                   </div>
 
                   <form onSubmit={handleParentAuth} className="space-y-4">
@@ -1372,7 +1301,7 @@ export default function App() {
                   </form>
 
                   <div className="text-[11px] text-[#8C8479] border-t pt-4">
-                    <span>* ההרשאות מנוהלות ב-AppSheet לפי מייל ההורה המחובר ({`hallel34@gmail.com`}).</span>
+                    <span>* ההרשאות מנוהלות ע״י קוד PIN.</span>
                   </div>
                 </div>
               ) : (
@@ -1381,7 +1310,7 @@ export default function App() {
                   {/* Dynamic Parent Control Bar */}
                   <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm">
                     <div>
-                      <h3 className="text-2xl font-bold text-[#5D4037]">👨‍👩‍👧‍👦 לוח הבקרה של הלל ומוריה</h3>
+                      <h3 className="text-2xl font-bold text-[#5D4037]">👨‍👩‍👧‍👦 לוח הבקרה להורים</h3>
                       <p className="text-sm text-[#8C8479]">מעקב התקדמות הילדים בזמן אמת, אישור משימות מרחוק ושליטה בזמן מסך</p>
                     </div>
                     
@@ -1408,7 +1337,7 @@ export default function App() {
                               <img src={child.photo} alt={child.name} className="w-8 h-8 rounded-full object-cover object-top border" style={{ borderColor: child.color }} />
                               <div>
                                 <h4 className="font-bold text-[#4A4540]">{child.name}</h4>
-                                <p className="text-[10px] text-[#8C8479]">{child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {child.age}</p>
+                                <p className="text-[10px] text-[#8C8479]">{child.gender === 'female' ? 'בת' : 'בן'} {child.age}</p>
                               </div>
                             </div>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -2114,7 +2043,7 @@ function syncMashovToAppSheet() {
 
         {/* BOTTOM GLOBAL FOOTER */}
         <footer className="bg-[#E9E4DB] border-t border-[#D6CFC4] p-4 text-center text-xs text-[#8C8479] space-y-1">
-          <p className="font-bold text-[#5D544A]">&copy; 2026 אפליקציית ניהול משימות לטאבלטים - משפחת הלל ומוריה</p>
+          <p className="font-bold text-[#5D544A]">&copy; 2026 אפליקציית ניהול משימות לטאבלטים</p>
           <p className="text-[10px]">מערכת יציבה מבוססת Google Sheets + AppSheet + Google Apps Script + Docker Container Host</p>
         </footer>
 
