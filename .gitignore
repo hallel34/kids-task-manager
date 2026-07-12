@@ -10,3 +10,6 @@ certs/
 .vercel/
 *.pfx
 *.pem
+
+.vercel
+.env*

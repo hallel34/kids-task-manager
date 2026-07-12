@@ -1,25 +1,26 @@
-export type Role = 'Admin' | 'Child';
 export type TimeOfDay = 'morning' | 'afternoon' | 'evening';
-
-export interface User {
-  id: string;
-  name: string;
-  role: Role;
-  age: number;
-}
+export type ViewMode = 'child' | 'parent';
 
 export interface Task {
   id: string;
-  name: string;
-  timeOfDay: TimeOfDay;
-  icon: string;
-  isMandatory: boolean;
-  requiresPhoto?: boolean;
+  time: TimeOfDay;
+  title: string;
+  emoji: string;
+  completed: boolean;
+  mandatory: boolean;
+  notes?: string;
+  photo?: string;       // Base64 Data URL or file string of captured proof
+  photoTime?: string;   // Local time string when captured
+  requiresPhoto?: boolean; // Requires camera photo proof to complete
 }
 
-export interface DailyAssignment {
+export interface Child {
   id: string;
-  userId: string;
-  taskId: string;
-  status: 'open' | 'done';
+  name: string;
+  age: number;
+  gender?: 'male' | 'female';
+  initial: string;
+  color: string;
+  avatarEmoji: string;
+  photo: string;
 }

@@ -1,16 +1,35 @@
 import express from 'express';
+import crypto from 'crypto';
 import { exec } from 'child_process';
 
 const app = express();
 app.use(express.json());
 
+// Shared-secret token so an arbitrary device on the LAN can't lock this
+// computer or mess with timers. Generated once per process start and
+// printed to the console; set LOCK_SERVER_TOKEN to pin it across restarts.
+const LOCK_TOKEN = process.env.LOCK_SERVER_TOKEN || crypto.randomBytes(16).toString('hex');
+
 // CORS - allow the Vite dev server to connect
 app.use((_req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, X-Lock-Token');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (_req.method === 'OPTIONS') {
     res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
+// Require the shared token on every endpoint except the health check.
+app.use((req, res, next) => {
+  if (req.path === '/api/health') {
+    next();
+    return;
+  }
+  if (req.header('X-Lock-Token') !== LOCK_TOKEN) {
+    res.status(401).json({ error: 'Unauthorized' });
     return;
   }
   next();
@@ -207,6 +226,7 @@ function formatTime(ms: number): string {
 const PORT = 3001;
 app.listen(PORT, () => {
   console.log(`\n🖥️  Lock Server running on http://localhost:${PORT}`);
+  console.log(`🔑 Auth token (send as X-Lock-Token header): ${LOCK_TOKEN}`);
   console.log(`📋 Endpoints:`);
   console.log(`   POST /api/timer/start   - Start timer { childId, childName, minutes }`);
   console.log(`   POST /api/timer/stop    - Stop timer  { childId }`);

@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Parent account profile (keyed by Firebase Auth uid) - used by the
+    // Google/email login flow. Only the signed-in owner may touch their own doc.
+    match /families/{familyId} {
+      allow get, create, update: if request.auth != null && request.auth.uid == familyId;
+      allow delete: if false;
+    }
+
+    // Cross-device sync keyed by the random family code (8 chars from a
+    // 32-symbol alphabet => ~1.1e12 combinations). The code itself acts as
+    // the shared secret / capability token, so no Firebase Auth is required
+    // here - but access is limited to the exact sub-documents the app uses,
+    // `list` is never granted (so the collection can't be enumerated), and
+    // writes are shape/size-validated to block junk-data or storage abuse.
+    match /families/{familyId}/dailyTasks/{date} {
+      allow get: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['tasks', 'updatedAt'])
+        && request.resource.data.tasks is string
+        && request.resource.data.tasks.size() < 200000
+        && request.resource.data.updatedAt is int;
+      allow delete: if false;
+    }
+
+    match /families/{familyId}/rewards/current {
+      allow get: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['smileys', 'gifts', 'updatedAt'])
+        && request.resource.data.smileys is string
+        && request.resource.data.smileys.size() < 50000
+        && request.resource.data.gifts is string
+        && request.resource.data.gifts.size() < 50000
+        && request.resource.data.updatedAt is int;
+      allow delete: if false;
+    }
+
+    // Everything else is denied by default.
+  }
+}

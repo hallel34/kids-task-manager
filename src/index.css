@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+/* Prevent pull-to-refresh on Android Chrome (would reset tasks) */
+html, body {
+  overscroll-behavior-y: contain;
+}

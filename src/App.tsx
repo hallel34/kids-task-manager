@@ -1,4 +1,27 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocalStorage } from './hooks/useLocalStorage';
+import { useCloudSync } from './hooks/useCloudSync';
+import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
+import type { Task, Child, TimeOfDay, ViewMode } from './types';
+import {
+  safeParseJSON,
+  CHILDREN,
+  SCREEN_TIME_REWARD,
+  PRIZE_STORE,
+  SHARED_DUTIES,
+  STREAK_BONUS_PER_DAY,
+  STREAK_WEEKLY_BONUS,
+  WEEKLY_EXCELLENCE_THRESHOLD,
+  WEEKLY_EXCELLENCE_BONUS,
+  getSchoolEndTime,
+  getDailyDutyAssignments,
+  getInitialTasksForChild,
+  getFridayTasksForChild,
+  getSharedDutyTasksFor,
+  getTasksForToday,
+  getEarnedScreenTime,
+} from './data/tasksData';
+import type { PrizeItem } from './data/tasksData';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Check, 
@@ -20,13 +43,9 @@ import {
   Trash2,
   Sparkles,
   CheckCheck,
-  Timer,
-  Lock,
-  Unlock,
   Clock,
   Plus,
   Minus,
-  Monitor,
   Gift,
   Star,
   Edit3,
@@ -34,263 +53,37 @@ import {
   Smile
 } from 'lucide-react';
 
-// ================= TYPES =================
-export type TimeOfDay = 'morning' | 'afternoon' | 'evening';
-export type ViewMode = 'child' | 'parent';
-
-// Lock server connection
-const LOCK_SERVER_URL = 'http://localhost:3001';
-
-interface ScreenTimer {
-  childId: string;
-  childName: string;
-  minutes: number;
-  startedAt: number;
-  endsAt: number;
-  remainingMs: number;
-  remainingFormatted: string;
-  locked: boolean;
+interface AppProps {
+  familyData?: import('./useAuth').FamilyData;
+  userId?: string;
+  onSignOut?: () => void;
 }
 
-export interface Task {
-  id: string;
-  time: TimeOfDay;
-  title: string;
-  emoji: string;
-  completed: boolean;
-  mandatory: boolean;
-  notes?: string;
-  photo?: string;       // Base64 Data URL or file string of captured proof
-  photoTime?: string;   // Local time string when captured
-  requiresPhoto?: boolean; // Requires camera photo proof to complete
-}
-
-export interface Child {
-  id: string;
-  name: string;
-  age: number;
-  initial: string;
-  color: string;
-  avatarEmoji: string;
-  photo: string;
-}
-
-// ================= DATA CONSTANTS =================
-const CHILDREN: Child[] = [
-  { id: 'arava', name: 'ערבה', age: 13, initial: 'ע', color: '#5D4037', avatarEmoji: '👧', photo: '/photos/arava.jpg' },
-  { id: 'hoshen', name: 'חושן', age: 10, initial: 'ח', color: '#D35400', avatarEmoji: '👧', photo: '/photos/hoshen.jpg' },
-  { id: 'peer', name: 'פאר', age: 7, initial: 'פ', color: '#6A7B42', avatarEmoji: '👦', photo: '/photos/peer.jpg' },
-  { id: 'rafael', name: 'רפאל', age: 5, initial: 'ר', color: '#8A9A5B', avatarEmoji: '👦', photo: '/photos/rafael.jpg' },
-];
-
-// Screen time reward (in minutes) per child for completing all mandatory tasks
-// Bonus minutes for each optional task completed
-const SCREEN_TIME_REWARD: Record<string, { base: number; bonusPerOptional: number }> = {
-  arava: { base: 60, bonusPerOptional: 5 },
-  hoshen: { base: 45, bonusPerOptional: 5 },
-  peer: { base: 30, bonusPerOptional: 5 },
-  rafael: { base: 20, bonusPerOptional: 3 },
-};
-
-// School schedule info
-const SCHOOL_SCHEDULE: Record<string, { regular: string; tuesday: string }> = {
-  arava: { regular: '15:45', tuesday: '13:45' },
-  hoshen: { regular: '14:30', tuesday: '12:30' },
-  peer: { regular: '14:30', tuesday: '12:30' },
-  rafael: { regular: '16:00', tuesday: '16:00' },
-};
-
-function getSchoolEndTime(childId: string): string {
-  const day = new Date().getDay(); // 0=Sun
-  const schedule = SCHOOL_SCHEDULE[childId];
-  if (!schedule) return '';
-  return day === 2 ? schedule.tuesday : schedule.regular; // Tuesday = 2
-}
-
-// Helper to construct personalized task list for each child based on age
-function getInitialTasksForChild(childId: string): Task[] {
-  switch (childId) {
-    case 'arava': // ערבה, 13, responsible teenager
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'הכנת תיק לבית ספר', emoji: '🎒', completed: false, mandatory: true },
-        { id: 'm3', time: 'morning', title: 'התלבשות והתארגנות', emoji: '👕', completed: false, mandatory: true },
-        { id: 'm4', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm5', time: 'morning', title: 'נטילת ידיים וברכות', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm6', time: 'morning', title: 'הוצאת הכלב לטיול בוקר', emoji: '🐕', completed: false, mandatory: true },
-        { id: 'm7', time: 'morning', title: 'סידור המיטה והחדר', emoji: '🛏️', completed: false, mandatory: true, requiresPhoto: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'הכנת שיעורי בית (משוב) 📚', emoji: '📝', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a2', time: 'afternoon', title: 'הוצאת קופסאות אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a3', time: 'afternoon', title: 'הכנסת כלים למדיח', emoji: '🍽️', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'תליית כביסה רטובה', emoji: '👕', completed: false, mandatory: true },
-        { id: 'a5', time: 'afternoon', title: 'קיפול כביסה יבשה', emoji: '🧺', completed: false, mandatory: true },
-        { id: 'a6', time: 'afternoon', title: 'החזרת בגדים מסודרים לארון', emoji: '🚪', completed: false, mandatory: false, requiresPhoto: true },
-        { id: 'a7', time: 'afternoon', title: 'הכנסת מכונת כביסה (במידה ויש)', emoji: '🧺', completed: false, mandatory: false },
-        { id: 'a8', time: 'afternoon', title: 'עזרה באחים הקטנים', emoji: '👶', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי כלים מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'הכנסת כלים למדיח וניקוי שולחן', emoji: '🍽️', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e4', time: 'evening', title: 'צחצוח שיניים של לילה', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e5', time: 'evening', title: 'התלבשות פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e6', time: 'evening', title: 'הוצאת הכלב לטיול לילה', emoji: '🐕', completed: false, mandatory: true },
-        { id: 'e7', time: 'evening', title: 'האכלת הכלב ארוחת לילה', emoji: '🦴', completed: false, mandatory: false },
-      ];
-
-    case 'hoshen': // חושן, 10
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'התלבשות עצמאית', emoji: '👕', completed: false, mandatory: true },
-        { id: 'm3', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm4', time: 'morning', title: 'נטילת ידיים וברכות', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm5', time: 'morning', title: 'סידור המיטה', emoji: '🛏️', completed: false, mandatory: true },
-        { id: 'm6', time: 'morning', title: 'הכנת תיק לבית ספר', emoji: '🎒', completed: false, mandatory: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'הוצאת הכלב לטיול צהריים', emoji: '🐕', completed: false, mandatory: true },
-        { id: 'a2', time: 'afternoon', title: 'הכנת שיעורי בית (משוב) 📚', emoji: '📝', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a3', time: 'afternoon', title: 'הוצאת קופסאות אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'הכנסת כלים למדיח', emoji: '🍽️', completed: false, mandatory: true },
-        { id: 'a5', time: 'afternoon', title: 'האכלת הכלב', emoji: '🦴', completed: false, mandatory: false },
-        { id: 'a6', time: 'afternoon', title: 'משחק עם הכלב בחצר ⚽', emoji: '🥎', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי כלים מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'ריקון המדיח (לפי בקשה)', emoji: '🥛', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e4', time: 'evening', title: 'צחצוח שיניים של לילה', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e5', time: 'evening', title: 'התלבשות פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e6', time: 'evening', title: 'הוצאת הכלב לטיול לילה', emoji: '🐕', completed: false, mandatory: true },
-      ];
-
-    case 'peer': // פאר, 7
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'התלבשות עצמאית', emoji: '👕', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm3', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm4', time: 'morning', title: 'נטילת ידיים וברכות', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm5', time: 'morning', title: 'סידור המיטה', emoji: '🛏️', completed: false, mandatory: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'הכנת שיעורי בית 📚', emoji: '📝', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a2', time: 'afternoon', title: 'הוצאת קופסאות אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a3', time: 'afternoon', title: 'פינוי והוצאת כלים נקיים מהמדיח', emoji: '🥛', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'האכלת הכלב וקערית מים', emoji: '🦴', completed: false, mandatory: false },
-        { id: 'a5', time: 'afternoon', title: 'משחק עם הכלב בחצר ⚽', emoji: '🥎', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי הכלים מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'צחצוח שיניים של לילה', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e4', time: 'evening', title: 'התלבשות פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e5', time: 'evening', title: 'סידור הצעצועים לפני שינה', emoji: '🧸', completed: false, mandatory: true, requiresPhoto: true },
-      ];
-
-    case 'rafael': // רפאל, 5, גן
-      return [
-        // Morning
-        { id: 'm1', time: 'morning', title: 'השכמה בזמן ⏰', emoji: '⏱️', completed: false, mandatory: true },
-        { id: 'm2', time: 'morning', title: 'לבישת כיפה', emoji: '🧢', completed: false, mandatory: true },
-        { id: 'm3', time: 'morning', title: 'נטילת ידיים וברכות בוקר', emoji: '💧', completed: false, mandatory: true },
-        { id: 'm4', time: 'morning', title: 'התלבשות (עם עזרה)', emoji: '👕', completed: false, mandatory: true },
-        { id: 'm5', time: 'morning', title: 'נעילת נעליים לבד', emoji: '👟', completed: false, mandatory: true },
-        { id: 'm6', time: 'morning', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'm7', time: 'morning', title: 'אכילת ארוחת בוקר', emoji: '🥣', completed: false, mandatory: true },
-        // Afternoon
-        { id: 'a1', time: 'afternoon', title: 'חליצת נעליים ושמירה במקום', emoji: '👟', completed: false, mandatory: true },
-        { id: 'a2', time: 'afternoon', title: 'הוצאת קופסת אוכל לכיור', emoji: '🍱', completed: false, mandatory: true },
-        { id: 'a3', time: 'afternoon', title: 'דפי ציור או יצירה 🎨', emoji: '🖍️', completed: false, mandatory: true },
-        { id: 'a4', time: 'afternoon', title: 'האכלת הכלב וקערית מים', emoji: '🦴', completed: false, mandatory: true },
-        { id: 'a5', time: 'afternoon', title: 'סידור הצעצועים', emoji: '🧸', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'a6', time: 'afternoon', title: 'משחק עם הכלב', emoji: '🐕', completed: false, mandatory: false },
-        { id: 'a7', time: 'afternoon', title: 'עזרה לשים כלים בכיור', emoji: '🍽️', completed: false, mandatory: false },
-        // Evening
-        { id: 'e1', time: 'evening', title: 'פינוי הצלחת מארוחת ערב', emoji: '🍛', completed: false, mandatory: true },
-        { id: 'e2', time: 'evening', title: 'מקלחת (עם עזרה)', emoji: '🚿', completed: false, mandatory: true },
-        { id: 'e3', time: 'evening', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
-        { id: 'e4', time: 'evening', title: 'לבישת פיג׳מה', emoji: '💤', completed: false, mandatory: true },
-        { id: 'e5', time: 'evening', title: 'סידור הצעצועים לפני שינה', emoji: '🧸', completed: false, mandatory: false },
-        { id: 'e6', time: 'evening', title: 'אמירת שמע ישראל', emoji: '🌙', completed: false, mandatory: true },
-      ];
-
-    default:
-      return [];
-  }
-}
-
-// Friday (Erev Shabbat) special tasks - replace afternoon tasks
-function getFridayTasksForChild(childId: string): Task[] {
-  const isOlder = childId === 'arava' || childId === 'hoshen';
-  const isYoungest = childId === 'rafael';
-
-  // Keep morning tasks as usual, but replace afternoon with Friday chores
-  const morningTasks = getInitialTasksForChild(childId).filter(t => t.time === 'morning');
-  
-  const fridayTasks: Task[] = [
-    // Friday afternoon - Shabbat prep
-    { id: 'f1', time: 'afternoon', title: 'סידור החדר וניקיון', emoji: '🧹', completed: false, mandatory: true, requiresPhoto: true },
-    { id: 'f2', time: 'afternoon', title: 'קיפול והכנסת כביסה לארון', emoji: '🧺', completed: false, mandatory: true },
-    { id: 'f3', time: 'afternoon', title: 'ניקיון הבית לשבת', emoji: '🏠', completed: false, mandatory: true },
-    { id: 'f4', time: 'afternoon', title: 'עריכת שולחן שבת', emoji: '🕯️', completed: false, mandatory: true },
-    { id: 'f5', time: 'afternoon', title: 'סידור נרות שבת', emoji: '🕎', completed: false, mandatory: true },
-    { id: 'f6', time: 'afternoon', title: 'השקיית הגינה', emoji: '🌱', completed: false, mandatory: isOlder },
-    { id: 'f7', time: 'afternoon', title: 'הוצאת הכלב', emoji: '🐕', completed: false, mandatory: true },
-    { id: 'f8', time: 'afternoon', title: 'עזרה בהכנות לשבת (בישולים)', emoji: '🍲', completed: false, mandatory: isOlder },
-  ];
-
-  // Younger kids get simpler tasks
-  if (isYoungest) {
-    return [
-      ...morningTasks,
-      { id: 'f1', time: 'afternoon', title: 'סידור הצעצועים בחדר', emoji: '🧸', completed: false, mandatory: true, requiresPhoto: true },
-      { id: 'f2', time: 'afternoon', title: 'עזרה בסידור שולחן שבת', emoji: '🕯️', completed: false, mandatory: true },
-      { id: 'f3', time: 'afternoon', title: 'השקיית עציצים', emoji: '🌱', completed: false, mandatory: true },
-      { id: 'f4', time: 'afternoon', title: 'הוצאת הכלב', emoji: '🐕', completed: false, mandatory: true },
-      { id: 'f5', time: 'afternoon', title: 'האכלת הכלב', emoji: '🦴', completed: false, mandatory: true },
-      // Evening
-      { id: 'fe1', time: 'evening', title: 'מקלחת לכבוד שבת', emoji: '🚿', completed: false, mandatory: true },
-      { id: 'fe2', time: 'evening', title: 'לבישת בגדי שבת', emoji: '👔', completed: false, mandatory: true },
-      { id: 'fe3', time: 'evening', title: 'אמירת שמע ישראל', emoji: '🌙', completed: false, mandatory: true },
-    ];
+export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
+  // If familyData is provided (from Firebase), override CHILDREN and settings
+  // We reassign the module-level CHILDREN so all references work
+  if (familyData) {
+    CHILDREN.length = 0;
+    familyData.children.forEach(c => {
+      CHILDREN.push({ ...c, initial: c.name[0] || '?' } as Child);
+    });
+    Object.keys(SCREEN_TIME_REWARD).forEach(k => delete SCREEN_TIME_REWARD[k]);
+    Object.assign(SCREEN_TIME_REWARD, familyData.screenTimeRewards);
   }
 
-  const fridayEvening: Task[] = [
-    { id: 'fe1', time: 'evening', title: 'מקלחת לכבוד שבת', emoji: '🚿', completed: false, mandatory: true },
-    { id: 'fe2', time: 'evening', title: 'לבישת בגדי שבת', emoji: '👔', completed: false, mandatory: true },
-  ];
+  const [savedPin, setSavedPin] = useState<string>(() => localStorage.getItem('hallel_parent_pin') || familyData?.parentPin || '1234');
+  const appPin = savedPin;
 
-  return [...morningTasks, ...fridayTasks, ...fridayEvening];
-}
+  // --- FAMILY CODE (cross-device sync via Firestore) ---
+  const [familyCodeInput, setFamilyCodeInput] = useState<string>('');
 
-// Get tasks based on day of week
-function getTasksForToday(childId: string): Task[] {
-  const day = new Date().getDay(); // 5 = Friday
-  if (day === 5) return getFridayTasksForChild(childId);
-  return getInitialTasksForChild(childId);
-}
-
-// Calculate earned screen time for a child
-function getEarnedScreenTime(childId: string, childTasks: Task[]): { earned: number; base: number; bonus: number; allMandatoryDone: boolean } {
-  const reward = SCREEN_TIME_REWARD[childId] || { base: 30, bonusPerOptional: 5 };
-  const mandatory = childTasks.filter(t => t.mandatory);
-  const optional = childTasks.filter(t => !t.mandatory);
-  const allMandatoryDone = mandatory.every(t => t.completed);
-  const completedOptional = optional.filter(t => t.completed).length;
-  const bonus = completedOptional * reward.bonusPerOptional;
-  return {
-    earned: allMandatoryDone ? reward.base + bonus : 0,
-    base: reward.base,
-    bonus,
-    allMandatoryDone,
-  };
-}
-
-export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('child');
-  const [activeChildId, setActiveChildId] = useState<string>('rafael');
+  const [activeChildId, setActiveChildId] = useState<string>(CHILDREN[0]?.id || 'child1');
   const [parentPin, setParentPin] = useState<string>('');
   const [parentPinError, setParentPinError] = useState<boolean>(false);
   const [isParentAuthenticated, setIsParentAuthenticated] = useState<boolean>(false);
+  const [newPinInput, setNewPinInput] = useState<string>('');
+  const [pinChangeMsg, setPinChangeMsg] = useState<string>('');
   
   // Custom router state simulated
   const [isMashovScraping, setIsMashovScraping] = useState<boolean>(false);
@@ -304,33 +97,54 @@ export default function App() {
   const [captureTaskTarget, setCaptureTaskTarget] = useState<{ childId: string; taskId: string } | null>(null);
   const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
 
-  // --- SCREEN TIME LOCK AUTOMATION ---
-  const [screenTimers, setScreenTimers] = useState<Record<string, ScreenTimer>>({});
-  const [timerMinutesInput, setTimerMinutesInput] = useState<Record<string, number>>({
-    arava: 30, hoshen: 30, peer: 30, rafael: 30
-  });
-  const [lockServerConnected, setLockServerConnected] = useState<boolean>(false);
-  const [lockServerMessage, setLockServerMessage] = useState<{ text: string; error: boolean } | null>(null);
-
   // Time of day override (null = auto by clock)
   const [overrideTimeOfDay, setOverrideTimeOfDay] = useState<TimeOfDay | null>(null);
+
+  // Daily shared duty assignments (seeded by date, stored in localStorage)
+  const [dailyDutyAssignments, setDailyDutyAssignments] = useState<Record<string, string>>(() => getDailyDutyAssignments());
 
   // Sidebar collapse
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
 
   // --- SMILEY REWARD & GIFT SYSTEM ---
-  const [smileyCount, setSmileyCount] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem('hallel_smileys');
-    return saved ? JSON.parse(saved) : { arava: 0, hoshen: 0, peer: 0, rafael: 0 };
+  const [smileyCount, setSmileyCount] = useLocalStorage<Record<string, number>>('hallel_smileys', () => {
+    const t: Record<string, number> = {};
+    CHILDREN.forEach(c => { t[c.id] = 0; });
+    return t;
   });
-  const [giftsRedeemed, setGiftsRedeemed] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem('hallel_gifts');
-    return saved ? JSON.parse(saved) : { arava: 0, hoshen: 0, peer: 0, rafael: 0 };
+  const [giftsRedeemed, setGiftsRedeemed] = useLocalStorage<Record<string, number>>('hallel_gifts', () => {
+    const t: Record<string, number> = {};
+    CHILDREN.forEach(c => { t[c.id] = 0; });
+    return t;
   });
   const [celebrationChild, setCelebrationChild] = useState<string | null>(null);
-  const [celebrationShown, setCelebrationShown] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('hallel_celebration_shown');
-    return saved ? JSON.parse(saved) : {};
+  const [celebrationShown, setCelebrationShown] = useLocalStorage<Record<string, string>>('hallel_celebration_shown', {});
+
+  // --- POINTS & PRIZE STORE SYSTEM ---
+  const [childPoints, setChildPoints] = useLocalStorage<Record<string, number>>('hallel_points', () => {
+    const t: Record<string, number> = {};
+    CHILDREN.forEach(c => { t[c.id] = 0; });
+    return t;
+  });
+  const [redeemedPrizes, setRedeemedPrizes] = useLocalStorage<Record<string, { prizeId: string; date: string }[]>>('hallel_redeemed_prizes', () => {
+    const t: Record<string, { prizeId: string; date: string }[]> = {};
+    CHILDREN.forEach(c => { t[c.id] = []; });
+    return t;
+  });
+  const [showPrizeStore, setShowPrizeStore] = useState<boolean>(false);
+
+  // --- STREAK SYSTEM ---
+  const [streaks, setStreaks] = useLocalStorage<Record<string, { count: number; lastDate: string }>>('hallel_streaks', () => {
+    const t: Record<string, { count: number; lastDate: string }> = {};
+    CHILDREN.forEach(c => { t[c.id] = { count: 0, lastDate: '' }; });
+    return t;
+  });
+
+  // --- WEEKLY STATS ---
+  const [weeklyStats, setWeeklyStats] = useLocalStorage<Record<string, { completedDays: number; totalTasks: number; completedTasks: number }>>('hallel_weekly_stats', () => {
+    const t: Record<string, { completedDays: number; totalTasks: number; completedTasks: number }> = {};
+    CHILDREN.forEach(c => { t[c.id] = { completedDays: 0, totalTasks: 0, completedTasks: 0 }; });
+    return t;
   });
 
   // --- MASHOV CREDENTIALS (stored locally only, never in code) ---
@@ -344,29 +158,171 @@ export default function App() {
   const [newTaskEmoji, setNewTaskEmoji] = useState<string>('📋');
   const [newTaskTime, setNewTaskTime] = useState<TimeOfDay>('afternoon');
   const [newTaskMandatory, setNewTaskMandatory] = useState<boolean>(true);
+  // Day-of-week selector for editing (0=Sun..5=Fri, 6=Sat)
+  type EditDay = 'today' | '0' | '1' | '2' | '3' | '4' | '5';
+  const [editDayOfWeek, setEditDayOfWeek] = useState<EditDay>('today');
+
+  // Custom tasks per day-of-week (persisted) - key: `${childId}_${dayNum}` or `${childId}_regular`
+  const [customDayTasks, setCustomDayTasks] = useLocalStorage<Record<string, Task[]>>('hallel_custom_day_tasks', {});
+
+  // Get tasks for a specific day-of-week for a child (template + custom)
+  const getTasksForDayOfWeek = (childId: string, day: EditDay): Task[] => {
+    if (day === 'today') return tasks[childId] || [];
+    const dayNum = parseInt(day);
+    if (dayNum === 5) {
+      const base = getFridayTasksForChild(childId);
+      const custom = customDayTasks[`${childId}_friday`] || [];
+      return [...base, ...custom];
+    }
+    const base = getInitialTasksForChild(childId);
+    const shared = getSharedDutyTasksFor(childId, dailyDutyAssignments);
+    const custom = customDayTasks[`${childId}_regular`] || [];
+    return [...base, ...shared, ...custom];
+  };
+
+  // Add task to a specific day template
+  const addTaskToDay = (childId: string, day: EditDay) => {
+    if (!newTaskTitle.trim()) return;
+    const newId = `custom_${Date.now()}`;
+    const newTask: Task = {
+      id: newId,
+      time: newTaskTime,
+      title: newTaskTitle.trim(),
+      emoji: newTaskEmoji,
+      completed: false,
+      mandatory: newTaskMandatory,
+    };
+    if (day === 'today') {
+      // Add to today's live tasks
+      setTasks(prev => ({
+        ...prev,
+        [childId]: [...(prev[childId] || []), newTask]
+      }));
+    } else {
+      const dayNum = parseInt(day);
+      const customKey = `${childId}_${dayNum === 5 ? 'friday' : 'regular'}`;
+      setCustomDayTasks(prev => ({
+        ...prev,
+        [customKey]: [...(prev[customKey] || []), newTask]
+      }));
+      // If editing the same day type as today, also add to live
+      const todayDay = new Date().getDay();
+      const editingFriday = dayNum === 5;
+      const todayIsFriday = todayDay === 5;
+      if ((editingFriday && todayIsFriday) || (!editingFriday && !todayIsFriday)) {
+        setTasks(prev => ({
+          ...prev,
+          [childId]: [...(prev[childId] || []), newTask]
+        }));
+      }
+    }
+    setNewTaskTitle('');
+    setNewTaskEmoji('📋');
+  };
+
+  // Remove task from day template
+  const removeTaskFromDay = (childId: string, taskId: string, day: EditDay) => {
+    if (day === 'today') {
+      setTasks(prev => ({
+        ...prev,
+        [childId]: (prev[childId] || []).filter(t => t.id !== taskId)
+      }));
+    } else {
+      const dayNum = parseInt(day);
+      const customKey = `${childId}_${dayNum === 5 ? 'friday' : 'regular'}`;
+      setCustomDayTasks(prev => ({
+        ...prev,
+        [customKey]: (prev[customKey] || []).filter(t => t.id !== taskId)
+      }));
+    }
+  };
+
+  // --- DASHBOARD PANEL COLLAPSE STATE ---
+  const [collapsedPanels, setCollapsedPanels] = useLocalStorage<Record<string, boolean>>('hallel_collapsed_panels', {});
+  const togglePanel = (id: string) => setCollapsedPanels(prev => ({ ...prev, [id]: !prev[id] }));
+
+  // --- DASHBOARD PANEL DRAG & DROP ORDER ---
+  const DEFAULT_PANEL_ORDER = ['tracker', 'photos', 'smileys', 'editor', 'mashov', 'technical'];
+  const [panelOrder, setPanelOrder] = useLocalStorage<string[]>('hallel_panel_order', () => {
+    const saved = localStorage.getItem('hallel_panel_order');
+    if (saved) {
+      const parsed = safeParseJSON<string[]>(saved, []);
+      // Merge with defaults in case new panels were added
+      const merged = [...parsed];
+      DEFAULT_PANEL_ORDER.forEach(p => { if (!merged.includes(p)) merged.push(p); });
+      return merged;
+    }
+    return DEFAULT_PANEL_ORDER;
+  });
+
+  const [draggedPanel, setDraggedPanel] = useState<string | null>(null);
+  const [dragOverPanel, setDragOverPanel] = useState<string | null>(null);
+
+  const handlePanelDragStart = (panelId: string) => {
+    setDraggedPanel(panelId);
+  };
+  const handlePanelDragOver = (e: React.DragEvent, panelId: string) => {
+    e.preventDefault();
+    if (draggedPanel && draggedPanel !== panelId) {
+      setDragOverPanel(panelId);
+    }
+  };
+  const handlePanelDrop = (panelId: string) => {
+    if (draggedPanel && draggedPanel !== panelId) {
+      setPanelOrder(prev => {
+        const newOrder = [...prev];
+        const fromIdx = newOrder.indexOf(draggedPanel);
+        const toIdx = newOrder.indexOf(panelId);
+        if (fromIdx !== -1 && toIdx !== -1) {
+          newOrder.splice(fromIdx, 1);
+          newOrder.splice(toIdx, 0, draggedPanel);
+        }
+        return newOrder;
+      });
+    }
+    setDraggedPanel(null);
+    setDragOverPanel(null);
+  };
+  const handlePanelDragEnd = () => {
+    setDraggedPanel(null);
+    setDragOverPanel(null);
+  };
+
+  // --- PARENT DASHBOARD TABS ---
+  type ParentTab = 'dashboard' | 'history';
+  const [parentTab, setParentTab] = useState<ParentTab>('dashboard');
+
+  // --- TASK HISTORY (daily completion records) ---
+  interface DayRecord {
+    date: string; // YYYY-MM-DD
+    children: Record<string, { completed: number; total: number; points: number }>;
+  }
+  const [taskHistory, setTaskHistory] = useLocalStorage<DayRecord[]>('hallel_task_history', []);
 
   // Track recently completed tasks (show for 5 seconds before hiding)
   const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set());
 
-  // Save smileys and gifts to localStorage
-  useEffect(() => {
-    localStorage.setItem('hallel_smileys', JSON.stringify(smileyCount));
-  }, [smileyCount]);
-  useEffect(() => {
-    localStorage.setItem('hallel_gifts', JSON.stringify(giftsRedeemed));
-  }, [giftsRedeemed]);
-  useEffect(() => {
-    localStorage.setItem('hallel_celebration_shown', JSON.stringify(celebrationShown));
-  }, [celebrationShown]);
-
   const [tasks, setTasks] = useState<Record<string, Task[]>>(() => {
-    return {
-      rafael: getTasksForToday('rafael'),
-      arava: getTasksForToday('arava'),
-      hoshen: getTasksForToday('hoshen'),
-      peer: getTasksForToday('peer'),
-    };
+    const today = new Date().toISOString().split('T')[0];
+    // Restore today's task completion state if available
+    const saved = safeParseJSON<{ date: string; state: Record<string, Array<{ id: string; completed: boolean; photo?: string; photoTime?: string }>> }>(
+      localStorage.getItem('hallel_tasks_progress'), { date: '', state: {} }
+    );
+    const base: Record<string, Task[]> = {};
+    CHILDREN.forEach(c => {
+      base[c.id] = getTasksForToday(c.id);
+      if (saved.date === today && saved.state[c.id]) {
+        const savedMap = Object.fromEntries(saved.state[c.id].map(s => [s.id, s]));
+        base[c.id] = base[c.id].map(t => savedMap[t.id]
+          ? { ...t, completed: savedMap[t.id].completed, photo: savedMap[t.id].photo, photoTime: savedMap[t.id].photoTime }
+          : t
+        );
+      }
+    });
+    return base;
   });
+
+  const { familyCode, setFamilyCode, syncEnabled, setSyncEnabled, syncStatus } = useCloudSync(tasks, setTasks);
 
   const [currentDate, setCurrentDate] = useState<string>('');
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -382,29 +338,86 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Save history on end of day (update today's record)
+  const updateTodayHistory = useCallback(() => {
+    const today = new Date().toISOString().split('T')[0];
+    setTaskHistory(prev => {
+      const existing = prev.find(r => r.date === today);
+      const childrenRecord: Record<string, { completed: number; total: number; points: number }> = {};
+      CHILDREN.forEach(c => {
+        const childTasks = tasks[c.id] || [];
+        const completed = childTasks.filter((t: any) => t.completed).length;
+        childrenRecord[c.id] = { completed, total: childTasks.length, points: childPoints[c.id] || 0 };
+      });
+      if (existing) {
+        return prev.map(r => r.date === today ? { ...r, children: childrenRecord } : r);
+      }
+      return [...prev, { date: today, children: childrenRecord }];
+    });
+  }, [tasks, childPoints]);
+
+  // Update history every minute
+  useEffect(() => {
+    updateTodayHistory();
+    const interval = setInterval(updateTodayHistory, 60000);
+    return () => clearInterval(interval);
+  }, [updateTodayHistory]);
+
+  // Save task completion progress for today (survives pull-to-refresh / page reload)
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const state: Record<string, Array<{ id: string; completed: boolean; photo?: string; photoTime?: string }>> = {};
+    CHILDREN.forEach(c => {
+      state[c.id] = (tasks[c.id] || []).map(t => ({ id: t.id, completed: t.completed, photo: t.photo, photoTime: t.photoTime }));
+    });
+    localStorage.setItem('hallel_tasks_progress', JSON.stringify({ date: today, state }));
+  }, [tasks]);
+
   const activeChild = CHILDREN.find((c) => c.id === activeChildId)!;
   const currentTasks = tasks[activeChildId] || [];
 
-  // Text-to-speech for Rafael - uses server-side Google Translate TTS
-  // Works on any device, no voice installation needed
+  // Text-to-speech for young children (Rafael age 5, Peer age 7)
+  // Primary: /api/tts proxy → Google Translate TTS (works on all devices, no Hebrew voice needed)
+  // Fallback: browser speechSynthesis
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
-  
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+
+  // Pre-load speech voices (Android Chrome loads them async)
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    const load = () => { voicesRef.current = window.speechSynthesis.getVoices(); };
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+    return () => { if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
   const speakTask = (text: string) => {
-    // Stop any currently playing audio
-    if (ttsAudioRef.current) {
-      ttsAudioRef.current.pause();
-      ttsAudioRef.current = null;
-    }
-    
+    // Primary: API proxy to Google Translate TTS - works on any device/language
     const encoded = encodeURIComponent(text);
-    const audio = new Audio(`/api/tts?text=${encoded}`);
-    ttsAudioRef.current = audio;
-    audio.play().catch(() => {});
+    const apiAudio = new Audio(`/api/tts?text=${encoded}`);
+    if (ttsAudioRef.current) { ttsAudioRef.current.pause(); }
+    ttsAudioRef.current = apiAudio;
+    apiAudio.play().then(() => {
+      // API worked - nothing more to do
+    }).catch(() => {
+      // Fallback: browser speechSynthesis (may need Hebrew TTS installed on device)
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      const voices = voicesRef.current.length ? voicesRef.current : window.speechSynthesis.getVoices();
+      const heVoice = voices.find(v => v.lang.startsWith('he'));
+      if (heVoice) utterance.voice = heVoice;
+      utterance.lang = 'he-IL';
+      utterance.rate = 0.85;
+      utterance.pitch = 1.1;
+      window.speechSynthesis.speak(utterance);
+    });
   };
 
   const handleTaskClick = (childId: string, taskId: string) => {
-    // For Rafael - read aloud on click (must be FIRST, directly in click handler for Android)
-    if (childId === 'rafael') {
+    // For young children (up to age 8) - read task aloud on click
+    const clickedChild = CHILDREN.find(c => c.id === childId);
+    if (clickedChild && clickedChild.age <= 8) {
       const task = (tasks[childId] || []).find(t => t.id === taskId);
       if (task) speakTask(task.title);
     }
@@ -432,6 +445,9 @@ export default function App() {
             return next;
           });
         }, 5000);
+        
+        // Award points for completing task
+        awardPointsForTask(childId, task.mandatory);
       }
       
       setTasks((prev) => {
@@ -461,6 +477,18 @@ export default function App() {
             setSmileyCount(prev => ({ ...prev, [childId]: (prev[childId] || 0) + 1 }));
             setCelebrationChild(childId);
             setCelebrationShown(prev => ({ ...prev, [childId]: today }));
+            
+            // Update streak - calculate completion percentage
+            const allMandatory = updatedChildTasks.filter(t => t.mandatory);
+            const completedAll = allMandatory.filter(t => t.completed).length;
+            const completionPercent = allMandatory.length > 0 ? completedAll / allMandatory.length : 0;
+            updateStreak(childId, completionPercent);
+            
+            // Award streak weekly bonus if reached 7
+            const childStreak = streaks[childId];
+            if (childStreak && childStreak.count > 0 && childStreak.count % 7 === 0) {
+              setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) + STREAK_WEEKLY_BONUS }));
+            }
           }, 300);
         }
         
@@ -515,7 +543,7 @@ export default function App() {
     };
     setTasks(prev => ({
       ...prev,
-      [childId]: [...prev[childId], newTask]
+      [childId]: [...(prev[childId] || []), newTask]
     }));
     setNewTaskTitle('');
     setNewTaskEmoji('📋');
@@ -524,7 +552,7 @@ export default function App() {
   const removeTask = (childId: string, taskId: string) => {
     setTasks(prev => ({
       ...prev,
-      [childId]: prev[childId].filter(t => t.id !== taskId)
+      [childId]: (prev[childId] || []).filter(t => t.id !== taskId)
     }));
   };
 
@@ -541,6 +569,60 @@ export default function App() {
       setSmileyCount(prev => ({ ...prev, [childId]: prev[childId] - 10 }));
       setGiftsRedeemed(prev => ({ ...prev, [childId]: (prev[childId] || 0) + 1 }));
     }
+  };
+
+  // --- PRIZE STORE REDEMPTION ---
+  const redeemPrize = (childId: string, prize: PrizeItem) => {
+    if ((childPoints[childId] || 0) >= prize.cost) {
+      setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) - prize.cost }));
+      setRedeemedPrizes(prev => ({
+        ...prev,
+        [childId]: [...(prev[childId] || []), { prizeId: prize.id, date: new Date().toISOString() }]
+      }));
+    }
+  };
+
+  // --- STREAK UPDATE (called at end of day or when all tasks done) ---
+  const updateStreak = (childId: string, completionPercent: number) => {
+    const today = new Date().toDateString();
+    setStreaks(prev => {
+      const current = prev[childId] || { count: 0, lastDate: '' };
+      if (current.lastDate === today) return prev; // Already updated today
+      
+      const yesterday = new Date(Date.now() - 86400000).toDateString();
+      if (completionPercent >= 0.8) {
+        // Good day! Continue or start streak
+        const newCount = current.lastDate === yesterday ? current.count + 1 : 1;
+        return { ...prev, [childId]: { count: newCount, lastDate: today } };
+      } else {
+        // Streak broken
+        return { ...prev, [childId]: { count: 0, lastDate: today } };
+      }
+    });
+  };
+
+  // --- AWARD DAILY POINTS (called when task completed) ---
+  const awardPointsForTask = (childId: string, isMandatory: boolean) => {
+    const reward = SCREEN_TIME_REWARD[childId] || { pointsPerMandatory: 3, pointsPerOptional: 2 };
+    const points = isMandatory ? reward.pointsPerMandatory : reward.pointsPerOptional;
+    
+    // Add streak bonus
+    const streak = streaks[childId];
+    const streakBonus = streak && streak.count > 0 ? STREAK_BONUS_PER_DAY : 0;
+    
+    setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) + points + streakBonus }));
+  };
+
+  // --- CHECK WEEKLY EXCELLENCE ---
+  const getWeeklyExcellenceStatus = (childId: string) => {
+    const stats = weeklyStats[childId] || { completedDays: 0, totalTasks: 0, completedTasks: 0 };
+    const ratio = stats.totalTasks > 0 ? stats.completedTasks / stats.totalTasks : 0;
+    return {
+      ...stats,
+      ratio,
+      isExcellent: ratio >= WEEKLY_EXCELLENCE_THRESHOLD,
+      bonusEarned: ratio >= WEEKLY_EXCELLENCE_THRESHOLD ? WEEKLY_EXCELLENCE_BONUS : 0,
+    };
   };
 
   // --- MASHOV SAVE ---
@@ -640,101 +722,6 @@ export default function App() {
     return 'יום ' + days[new Date().getDay()];
   };
 
-  // --- SCREEN TIME LOCK SERVER FUNCTIONS ---
-  const checkLockServerHealth = useCallback(async () => {
-    try {
-      const res = await fetch(`${LOCK_SERVER_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
-      if (res.ok) {
-        setLockServerConnected(true);
-        return true;
-      }
-    } catch {
-      setLockServerConnected(false);
-    }
-    return false;
-  }, []);
-
-  const fetchTimerStatus = useCallback(async () => {
-    try {
-      const res = await fetch(`${LOCK_SERVER_URL}/api/timer/status`, { signal: AbortSignal.timeout(2000) });
-      if (res.ok) {
-        const data = await res.json();
-        setScreenTimers(data.timers || {});
-        setLockServerConnected(true);
-      }
-    } catch {
-      // silent fail - server may be offline
-    }
-  }, []);
-
-  // Poll lock server status every second for countdown
-  useEffect(() => {
-    checkLockServerHealth();
-    const interval = setInterval(fetchTimerStatus, 1000);
-    return () => clearInterval(interval);
-  }, [checkLockServerHealth, fetchTimerStatus]);
-
-  const startScreenTimer = async (childId: string) => {
-    const child = CHILDREN.find(c => c.id === childId);
-    const minutes = timerMinutesInput[childId] || 30;
-    try {
-      const res = await fetch(`${LOCK_SERVER_URL}/api/timer/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ childId, childName: child?.name || childId, minutes })
-      });
-      if (res.ok) {
-        setLockServerMessage({ text: `⏱️ טיימר של ${minutes} דקות הופעל עבור ${child?.name}`, error: false });
-        fetchTimerStatus();
-      } else {
-        const err = await res.json();
-        setLockServerMessage({ text: `שגיאה: ${err.error}`, error: true });
-      }
-    } catch (e: any) {
-      setLockServerMessage({ text: `שגיאת חיבור לשרת הנעילה: ${e.message}`, error: true });
-    }
-  };
-
-  const stopScreenTimer = async (childId: string) => {
-    try {
-      await fetch(`${LOCK_SERVER_URL}/api/timer/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ childId })
-      });
-      setLockServerMessage({ text: `⏹️ הטיימר בוטל`, error: false });
-      fetchTimerStatus();
-    } catch (e: any) {
-      setLockServerMessage({ text: `שגיאת חיבור: ${e.message}`, error: true });
-    }
-  };
-
-  const extendScreenTimer = async (childId: string, extraMinutes: number) => {
-    try {
-      await fetch(`${LOCK_SERVER_URL}/api/timer/extend`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ childId, extraMinutes })
-      });
-      setLockServerMessage({ text: `⏱️➕ הטיימר הוארך ב-${extraMinutes} דקות`, error: false });
-      fetchTimerStatus();
-    } catch (e: any) {
-      setLockServerMessage({ text: `שגיאת חיבור: ${e.message}`, error: true });
-    }
-  };
-
-  const lockComputerNow = async () => {
-    try {
-      await fetch(`${LOCK_SERVER_URL}/api/lock`, { method: 'POST' });
-      setLockServerMessage({ text: '🔒 המחשב ננעל!', error: false });
-    } catch (e: any) {
-      setLockServerMessage({ text: `שגיאת חיבור: ${e.message}`, error: true });
-    }
-  };
-
-  // Get active timer for the current child (for child view)
-  const activeTimerForChild = screenTimers[activeChildId] || null;
-
   // Progress calculations for active child
   const mandatoryTasks = currentTasks.filter((t) => t.mandatory);
   const completedMandatoryTasks = mandatoryTasks.filter((t) => t.completed);
@@ -746,8 +733,8 @@ export default function App() {
   // Screen time reward for active child
   const screenTimeInfo = getEarnedScreenTime(activeChildId, currentTasks);
 
-  const completedTotalCount = currentTasks.filter(t => t.completed).length;
-  const totalTaskCount = currentTasks.length;
+  const completedTotalCount = CHILDREN.reduce((sum, c) => sum + (tasks[c.id] || []).filter(t => t.completed).length, 0);
+  const totalTaskCount = CHILDREN.reduce((sum, c) => sum + (tasks[c.id] || []).length, 0);
 
   const getTasksByTime = (childId: string, time: TimeOfDay) => {
     return (tasks[childId] || []).filter((t) => t.time === time);
@@ -792,8 +779,7 @@ export default function App() {
 
   const handleParentAuth = (e: React.FormEvent) => {
     e.preventDefault();
-    // Change this PIN to your own! Default: 1234
-    if (parentPin === '1234') {
+    if (parentPin === appPin) {
       setIsParentAuthenticated(true);
       setParentPinError(false);
       setViewMode('parent');
@@ -808,6 +794,55 @@ export default function App() {
     setViewMode('child');
     setParentPin('');
   };
+
+  // --- SHABBAT STATUS ---
+  const shabbatStatus = isCurrentlyShabbat();
+  const hebrewDate = getHebrewDate();
+
+  // --- JOURNAL FILTER STATE ---
+  type JournalFilter = 'day' | 'week' | 'month';
+  const [journalFilter, setJournalFilter] = useState<JournalFilter>('week');
+  const [journalChildFilter, setJournalChildFilter] = useState<string>('all');
+  const [journalDate, setJournalDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
+  // If Shabbat - show Shabbat screen
+  if (shabbatStatus.isShabbat) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#1a1a2e] to-[#16213e] flex items-center justify-center p-6" dir="rtl">
+        <div className="max-w-lg w-full text-center space-y-8">
+          <motion.div
+            animate={{ scale: [1, 1.05, 1] }}
+            transition={{ repeat: Infinity, duration: 3 }}
+            className="text-8xl"
+          >
+            🕯️
+          </motion.div>
+          
+          <div className="space-y-3">
+            <h1 className="text-4xl font-bold text-amber-200 font-serif">שבת שלום!</h1>
+            <p className="text-xl text-amber-100/80">{hebrewDate}</p>
+            <p className="text-lg text-white/60">{LOCATION.name}</p>
+          </div>
+
+          <div className="bg-white/10 backdrop-blur-sm p-6 rounded-3xl border border-white/20 space-y-4">
+            <div className="flex justify-between items-center text-amber-100">
+              <span className="text-sm">🕯️ הדלקת נרות:</span>
+              <span className="font-bold text-lg">{shabbatStatus.candleLighting}</span>
+            </div>
+            <div className="flex justify-between items-center text-amber-100">
+              <span className="text-sm">✨ צאת שבת (הבדלה):</span>
+              <span className="font-bold text-lg">{shabbatStatus.havdalah}</span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-white/50 text-sm">האפליקציה תחזור לפעילות בצאת השבת</p>
+            <p className="text-white/30 text-xs">שבת שלום למשפחת הלל ומוריה 💛</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#4A4540] font-sans selection:bg-[#E3DCD2] flex flex-col md:flex-row-reverse" dir="rtl">
@@ -946,6 +981,50 @@ export default function App() {
               </div>
             </div>
 
+            {/* Points & Rewards Dashboard */}
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-4 rounded-2xl border border-indigo-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-indigo-800 flex items-center gap-1">
+                  <span>⭐</span>
+                  <span>הנקודות שלי</span>
+                </h4>
+                <span className="text-xl font-bold text-indigo-700">{childPoints[activeChildId] || 0}</span>
+              </div>
+              
+              {/* Today's earned */}
+              <div className="bg-white/60 p-2 rounded-lg border border-indigo-100">
+                <p className="text-[10px] text-indigo-600 font-bold">
+                  📊 היום: {getEarnedScreenTime(activeChildId, tasks[activeChildId] || []).points} נק׳ נצברו
+                </p>
+                <p className="text-[10px] text-indigo-500">
+                  🎮 זמן מסך שנצבר: {getEarnedScreenTime(activeChildId, tasks[activeChildId] || []).earned} דק׳
+                </p>
+              </div>
+
+              {/* Streak display */}
+              <div className="flex items-center justify-between bg-orange-50/80 p-2 rounded-lg border border-orange-200">
+                <div className="flex items-center gap-1">
+                  <span className="text-sm">🔥</span>
+                  <span className="text-[10px] font-bold text-orange-700">רצף ימים:</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm font-bold text-orange-700">{streaks[activeChildId]?.count || 0}</span>
+                  {(streaks[activeChildId]?.count || 0) >= 3 && <span className="text-xs">🌟</span>}
+                  {(streaks[activeChildId]?.count || 0) >= 7 && <span className="text-xs">🏆</span>}
+                </div>
+              </div>
+
+              {/* Prize store button */}
+              <button
+                onClick={() => setShowPrizeStore(true)}
+                className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+              >
+                <span>🏪</span>
+                <span>חנות הפרסים</span>
+                <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px]">{childPoints[activeChildId] || 0} נק׳</span>
+              </button>
+            </div>
+
             {/* Smiley & Gift Tracker */}
             <div className="bg-amber-50/80 p-4 rounded-2xl border border-amber-200 space-y-3">
               <div className="flex items-center justify-between">
@@ -993,6 +1072,35 @@ export default function App() {
               )}
             </div>
 
+            {/* Weekly Excellence */}
+            {(() => {
+              const weekly = getWeeklyExcellenceStatus(activeChildId);
+              return (
+                <div className="bg-emerald-50/80 p-3 rounded-2xl border border-emerald-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-bold text-emerald-800 flex items-center gap-1">
+                      <span>🏅</span>
+                      <span>בונוס שבועי</span>
+                    </h4>
+                    <span className="text-[10px] font-bold text-emerald-600">
+                      {weekly.completedDays}/7 ימים
+                    </span>
+                  </div>
+                  <div className="h-2 bg-emerald-100 rounded-full overflow-hidden border border-emerald-200">
+                    <div 
+                      className="h-full bg-emerald-400 transition-all duration-500"
+                      style={{ width: `${Math.min(100, (weekly.completedDays / 7) * 100)}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-[9px] text-emerald-600">
+                    {weekly.isExcellent 
+                      ? `🎉 הצטיינות! קיבלת ${WEEKLY_EXCELLENCE_BONUS} נקודות בונוס!` 
+                      : `90%+ השלמה = ${WEEKLY_EXCELLENCE_BONUS} נקודות בונוס`}
+                  </p>
+                </div>
+              );
+            })()}
+
             {/* Help Block */}
             <div className="p-4 bg-[#8A9A5B]/10 rounded-2xl border border-[#8A9A5B]/20 text-center text-xs space-y-2">
               <p className="text-[#6A7B42] mb-0.5 font-bold">צריך עזרה עם המשימות?</p>
@@ -1006,6 +1114,56 @@ export default function App() {
               >
                 🔊 בדיקת קול
               </button>
+            </div>
+
+            {/* Sync Panel - always visible regardless of mode */}
+            <div className="bg-[#E3DCD2] p-3 rounded-2xl space-y-2 text-[11px] text-[#5D544A]">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs">☁️ סנכרון</span>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${
+                    syncStatus === 'ok' ? 'bg-green-500' :
+                    syncStatus === 'syncing' ? 'bg-blue-400 animate-pulse' :
+                    syncStatus === 'error' ? 'bg-red-500' : 'bg-gray-300'
+                  }`} />
+                  <span className="text-[9px] text-[#8C8479]">
+                    {syncStatus === 'ok' ? 'מסונכרן ✓' : syncStatus === 'syncing' ? 'שומר...' : syncStatus === 'error' ? 'שגיאה' : 'כבוי'}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setSyncEnabled(!syncEnabled);
+                    }}
+                    className={`relative w-8 h-4 rounded-full transition-colors ${syncEnabled ? 'bg-[#8A9A5B]' : 'bg-[#C5BDB4]'}`}
+                  >
+                    <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all ${syncEnabled ? 'right-0.5' : 'left-0.5'}`} />
+                  </button>
+                </div>
+              </div>
+              {syncEnabled && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <code className="flex-1 bg-white border border-[#D6CFC4] rounded px-1.5 py-1 text-center font-mono font-bold text-xs text-[#5D4037] tracking-widest">{familyCode}</code>
+                    <button onClick={() => navigator.clipboard?.writeText(familyCode)} className="text-[10px] p-1 bg-white border border-[#D6CFC4] rounded" title="העתק">📋</button>
+                  </div>
+                  <div className="flex gap-1">
+                    <input
+                      value={familyCodeInput}
+                      onChange={e => setFamilyCodeInput(e.target.value.toUpperCase().slice(0, 9))}
+                      placeholder="קוד ממכשיר אחר"
+                      className="flex-1 bg-white border border-[#D6CFC4] rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-[#8A9A5B]"
+                    />
+                    <button
+                      onClick={() => {
+                        const code = familyCodeInput.trim();
+                        if (code.length < 8) return;
+                        setFamilyCode(code);
+                        setFamilyCodeInput('');
+                      }}
+                      className="px-2 py-1 bg-[#8A9A5B] text-white rounded text-[10px] font-bold hover:bg-[#6A7B42]"
+                    >קבע</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1043,6 +1201,46 @@ export default function App() {
                   >
                     התנתק ממצב הורה
                   </button>
+
+                  {/* Change PIN */}
+                  <div className="border-t border-[#D6CFC4] pt-3 space-y-2">
+                    <p className="text-[10px] font-bold text-[#8C8479]">שינוי קוד PIN:</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="קוד חדש (4 ספרות)"
+                        value={newPinInput}
+                        onChange={e => setNewPinInput(e.target.value.slice(0, 4))}
+                        className="flex-1 px-2 py-1.5 border border-[#D6CFC4] rounded-lg text-xs text-center font-mono focus:outline-none focus:ring-2 focus:ring-[#8A9A5B]"
+                      />
+                      <button
+                        onClick={() => {
+                          if (newPinInput.length < 4) {
+                            setPinChangeMsg('קוד חייב להיות 4 ספרות');
+                            return;
+                          }
+                          localStorage.setItem('hallel_parent_pin', newPinInput);
+                          setSavedPin(newPinInput);
+                          setNewPinInput('');
+                          setPinChangeMsg('✅ קוד עודכן!');
+                          setTimeout(() => setPinChangeMsg(''), 3000);
+                        }}
+                        className="px-3 py-1.5 bg-[#8A9A5B] text-white rounded-lg text-xs font-bold hover:bg-[#6A7B42] transition-colors"
+                      >
+                        שמור
+                      </button>
+                    </div>
+                    {pinChangeMsg && <p className="text-[10px] text-center font-bold text-[#8A9A5B]">{pinChangeMsg}</p>}
+                  </div>
+                  
+                  {onSignOut && (
+                    <button 
+                      onClick={onSignOut}
+                      className="w-full py-2 bg-slate-200 text-slate-700 rounded-xl font-bold text-xs hover:bg-slate-300 transition-colors mt-1"
+                    >
+                      🚪 התנתק מהחשבון
+                    </button>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-[#8C8479] leading-relaxed">
@@ -1055,15 +1253,87 @@ export default function App() {
             <div className="bg-[#E3DCD2] p-4 rounded-2xl space-y-1.5 text-[11px] font-mono text-[#5D544A]">
               <div className="font-bold border-b border-[#D6CFC4] pb-1 mb-1 text-xs">סטטוס אינטגרציות:</div>
               <div className="flex justify-between">
-                <span>שרת נעילת מסך:</span>
-                <span className={`font-bold ${lockServerConnected ? 'text-green-700' : 'text-red-600'}`}>
-                  {lockServerConnected ? 'מחובר ✓' : 'לא מחובר ✗'}
-                </span>
-              </div>
-              <div className="flex justify-between">
                 <span>Mashov API:</span>
                 <span className="text-green-700 font-bold">מחובר (OK)</span>
               </div>
+            </div>
+
+            {/* Family Sync Panel */}
+            <div className="bg-[#E3DCD2] p-4 rounded-2xl space-y-3 text-[11px] text-[#5D544A]">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs">סנכרון בין מכשירים ☁️</span>
+                <button
+                  onClick={() => {
+                    setSyncEnabled(!syncEnabled);
+                  }}
+                  className={`relative w-9 h-5 rounded-full transition-colors ${
+                    syncEnabled ? 'bg-[#8A9A5B]' : 'bg-[#C5BDB4]'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${
+                    syncEnabled ? 'right-0.5' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+
+              {syncEnabled && (
+                <>
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-[#8C8479]">קוד משפחה שלך:</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 bg-white border border-[#D6CFC4] rounded-lg px-2 py-1.5 text-center font-mono font-bold text-sm tracking-widest text-[#5D4037]">
+                        {familyCode}
+                      </code>
+                      <button
+                        onClick={() => navigator.clipboard?.writeText(familyCode)}
+                        className="p-1.5 bg-white border border-[#D6CFC4] rounded-lg hover:bg-[#F2EDE4] text-[10px]"
+                        title="העתק"
+                      >
+                        📋
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-[#8C8479] leading-snug">
+                      הכנס את אותו הקוד בכל המכשירים והדק סינכרון.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-[#8C8479]">או הכנס קוד ממכשיר אחר:</p>
+                    <div className="flex gap-1.5">
+                      <input
+                        value={familyCodeInput}
+                        onChange={e => setFamilyCodeInput(e.target.value.toUpperCase().slice(0, 9))}
+                        placeholder="XXXX-XXXX"
+                        className="flex-1 bg-white border border-[#D6CFC4] rounded-lg px-2 py-1 text-[11px] font-mono text-center focus:outline-none focus:ring-1 focus:ring-[#8A9A5B]"
+                      />
+                      <button
+                        onClick={() => {
+                          const code = familyCodeInput.trim();
+                          if (code.length < 8) return;
+                          setFamilyCode(code);
+                          setFamilyCodeInput('');
+                        }}
+                        className="px-2 py-1 bg-[#8A9A5B] text-white rounded-lg text-[10px] font-bold hover:bg-[#6A7B42]"
+                      >
+                        קבע
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${
+                      syncStatus === 'ok' ? 'bg-green-500 animate-pulse' :
+                      syncStatus === 'syncing' ? 'bg-blue-400 animate-pulse' :
+                      syncStatus === 'error' ? 'bg-red-500' : 'bg-gray-300'
+                    }`} />
+                    <span className="text-[10px]">
+                      {syncStatus === 'ok' ? 'מסונכרן ✓' :
+                       syncStatus === 'syncing' ? 'שומר...' :
+                       syncStatus === 'error' ? 'שגיאת סינכרון' : 'מחכה'}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -1098,8 +1368,9 @@ export default function App() {
           
           <div className="flex items-center gap-2 sm:gap-4">
             <div className="text-left text-xs text-[#8C8479] leading-tight hidden lg:block">
-              <div className="font-bold">{getDayName()}</div>
+              <div className="font-bold">{getDayName()} | {hebrewDate}</div>
               <div>{currentDate} | {currentTime}</div>
+              <div className="text-[9px] text-amber-700">🕯️ {shabbatStatus.candleLighting} | ✨ {shabbatStatus.havdalah}</div>
             </div>
 
             {/* Quick Toggle for Parent Mode in Header */}
@@ -1136,12 +1407,9 @@ export default function App() {
             <button
               onClick={() => {
                 if (window.confirm('האם ברצונך לאפס את המשימות של כל הילדים להתחלה?')) {
-                  setTasks({
-                    rafael: getTasksForToday('rafael'),
-                    arava: getTasksForToday('arava'),
-                    hoshen: getTasksForToday('hoshen'),
-                    peer: getTasksForToday('peer'),
-                  });
+                  const t: Record<string, Task[]> = {};
+                  CHILDREN.forEach(c => { t[c.id] = getTasksForToday(c.id); });
+                  setTasks(t);
                 }
               }}
               className="p-2 border border-[#D6CFC4] rounded-lg bg-white text-xs hover:bg-[#F2EDE4] text-[#8C8479] flex items-center gap-1.5 transition-all"
@@ -1232,9 +1500,13 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Smiley count */}
-                      <div className="flex items-center justify-between text-[10px]">
+                      {/* Points, Smiley & Streak count */}
+                      <div className="flex items-center justify-between text-[10px] flex-wrap gap-1">
+                        <span className="text-indigo-700 font-bold">⭐ {childPoints[child.id] || 0}</span>
                         <span className="text-amber-700 font-bold">😊 {smileyCount[child.id] || 0}</span>
+                        {(streaks[child.id]?.count || 0) > 0 && (
+                          <span className="text-orange-600 font-bold">🔥 {streaks[child.id]?.count}</span>
+                        )}
                         {childScreenTime.earned > 0 && (
                           <span className="text-indigo-600 font-bold">🎮 {childScreenTime.earned} דק׳</span>
                         )}
@@ -1397,7 +1669,469 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* REAL-TIME KIDS TRACKER CARDS (4 Children grid) */}
+                  {/* PARENT DASHBOARD TABS */}
+                  <div className="flex gap-2 bg-[#E9E4DB] p-1.5 rounded-xl">
+                    <button
+                      onClick={() => setParentTab('dashboard')}
+                      className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-center flex items-center justify-center gap-1.5 ${
+                        parentTab === 'dashboard'
+                          ? 'bg-white text-[#5D4037] shadow-sm'
+                          : 'text-[#8C8479] hover:text-[#5D544A]'
+                      }`}
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                      <span>לוח בקרה</span>
+                    </button>
+                    <button
+                      onClick={() => setParentTab('history')}
+                      className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-center flex items-center justify-center gap-1.5 ${
+                        parentTab === 'history'
+                          ? 'bg-white text-[#5D4037] shadow-sm'
+                          : 'text-[#8C8479] hover:text-[#5D544A]'
+                      }`}
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      <span>📅 היסטוריה וגרפים</span>
+                    </button>
+                  </div>
+
+                  {/* TAB CONTENT: HISTORY & CALENDAR */}
+                  {parentTab === 'history' && (
+                    <div className="space-y-6">
+
+                      {/* HEBREW DATE & SHABBAT INFO HEADER */}
+                      <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-5 rounded-3xl border border-amber-200 shadow-sm">
+                        <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <span className="text-3xl">📅</span>
+                            <div>
+                              <h3 className="text-lg font-bold text-[#5D4037]">{hebrewDate}</h3>
+                              <p className="text-xs text-[#8C8479]">{getDayName()} | {currentDate} | {LOCATION.name}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4 bg-white/60 px-4 py-2 rounded-xl border border-amber-200">
+                            <div className="text-center">
+                              <span className="text-[10px] text-[#8C8479] block">🕯️ כניסת שבת</span>
+                              <span className="text-sm font-bold text-[#5D4037]">{shabbatStatus.candleLighting}</span>
+                            </div>
+                            <div className="w-px h-8 bg-amber-200"></div>
+                            <div className="text-center">
+                              <span className="text-[10px] text-[#8C8479] block">✨ צאת שבת</span>
+                              <span className="text-sm font-bold text-[#5D4037]">{shabbatStatus.havdalah}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* JOURNAL FILTERS */}
+                      <div className="bg-white p-4 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-3">
+                        <h4 className="font-bold text-[#5D4037] text-sm flex items-center gap-2">
+                          <span>🔍</span> סינון וניהול
+                        </h4>
+                        <div className="flex flex-wrap gap-3 items-center">
+                          {/* Child filter */}
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-bold text-[#8C8479]">ילד/ה:</span>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => setJournalChildFilter('all')}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                                  journalChildFilter === 'all' ? 'bg-[#8A9A5B] text-white' : 'bg-[#F2EDE4] text-[#5D4037] hover:bg-[#E9E4DB]'
+                                }`}
+                              >כולם</button>
+                              {CHILDREN.map(c => (
+                                <button
+                                  key={c.id}
+                                  onClick={() => setJournalChildFilter(c.id)}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 ${
+                                    journalChildFilter === c.id ? 'bg-[#8A9A5B] text-white' : 'bg-[#F2EDE4] text-[#5D4037] hover:bg-[#E9E4DB]'
+                                  }`}
+                                >
+                                  <img src={c.photo} alt={c.name} className="w-4 h-4 rounded-full object-cover object-top" />
+                                  {c.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Time filter */}
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-bold text-[#8C8479]">תקופה:</span>
+                            <div className="flex gap-1">
+                              {([['day', 'יום'], ['week', 'שבוע'], ['month', 'חודש']] as [JournalFilter, string][]).map(([key, label]) => (
+                                <button
+                                  key={key}
+                                  onClick={() => setJournalFilter(key)}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                                    journalFilter === key ? 'bg-indigo-600 text-white' : 'bg-[#F2EDE4] text-[#5D4037] hover:bg-[#E9E4DB]'
+                                  }`}
+                                >{label}</button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Date picker */}
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-bold text-[#8C8479]">תאריך:</span>
+                            <input
+                              type="date"
+                              value={journalDate}
+                              onChange={e => setJournalDate(e.target.value)}
+                              className="px-2 py-1 text-[10px] border border-[#D6CFC4] rounded-lg bg-white"
+                            />
+                            <button
+                              onClick={() => setJournalDate(new Date().toISOString().split('T')[0])}
+                              className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700"
+                            >היום</button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* JOURNAL - Task records for filtered period */}
+                      <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-4">
+                        <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2 border-b border-[#F2EDE4] pb-3">
+                          <span>📖</span> יומן משימות
+                          <span className="text-xs font-normal text-[#8C8479]">
+                            ({journalFilter === 'day' ? 'יום' : journalFilter === 'week' ? 'שבוע' : 'חודש'}
+                            {journalChildFilter !== 'all' && ` — ${CHILDREN.find(c => c.id === journalChildFilter)?.name}`})
+                          </span>
+                        </h4>
+
+                        {(() => {
+                          // Filter history based on selections
+                          const baseDate = new Date(journalDate);
+                          let filteredHistory = taskHistory;
+                          
+                          if (journalFilter === 'day') {
+                            filteredHistory = taskHistory.filter(r => r.date === journalDate);
+                          } else if (journalFilter === 'week') {
+                            const weekStart = new Date(baseDate);
+                            weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+                            const weekEnd = new Date(weekStart);
+                            weekEnd.setDate(weekEnd.getDate() + 6);
+                            filteredHistory = taskHistory.filter(r => {
+                              const d = new Date(r.date);
+                              return d >= weekStart && d <= weekEnd;
+                            });
+                          } else {
+                            const monthStart = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+                            const monthEnd = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0);
+                            filteredHistory = taskHistory.filter(r => {
+                              const d = new Date(r.date);
+                              return d >= monthStart && d <= monthEnd;
+                            });
+                          }
+
+                          if (filteredHistory.length === 0) {
+                            return (
+                              <div className="text-center py-8 text-[#8C8479]">
+                                <span className="text-4xl block mb-2">📭</span>
+                                <p className="text-sm font-bold">אין נתונים לתקופה שנבחרה</p>
+                                <p className="text-xs">משימות יתחילו להיאסף מרגע שהילדים ישלימו אותן</p>
+                              </div>
+                            );
+                          }
+
+                          const childrenToShow = journalChildFilter === 'all' 
+                            ? CHILDREN 
+                            : CHILDREN.filter(c => c.id === journalChildFilter);
+
+                          return (
+                            <div className="space-y-3">
+                              {filteredHistory.map((day, idx) => {
+                                const dayDate = new Date(day.date);
+                                const hebrewDay = getHebrewDayMonth(dayDate);
+                                const dayNames = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+                                const isToday = day.date === new Date().toISOString().split('T')[0];
+                                
+                                return (
+                                  <div key={idx} className={`p-3 rounded-xl border ${isToday ? 'border-[#8A9A5B] bg-green-50/30' : 'border-[#E3DCD2] bg-[#FAF8F5]'}`}>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-bold text-[#5D4037]">
+                                          יום {dayNames[dayDate.getDay()]} | {dayDate.toLocaleDateString('he-IL')}
+                                        </span>
+                                        <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{hebrewDay}</span>
+                                        {isToday && <span className="text-[10px] font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded">היום</span>}
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                      {childrenToShow.map(child => {
+                                        const rec = day.children[child.id];
+                                        if (!rec) return null;
+                                        const pct = rec.total > 0 ? Math.round((rec.completed / rec.total) * 100) : 0;
+                                        return (
+                                          <div key={child.id} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-[#E3DCD2]">
+                                            <img src={child.photo} alt={child.name} className="w-6 h-6 rounded-full object-cover object-top border" style={{ borderColor: child.color }} />
+                                            <div className="flex-1 min-w-0">
+                                              <span className="text-[10px] font-bold text-[#5D4037] block truncate">{child.name}</span>
+                                              <div className="flex items-center gap-1">
+                                                <div className="flex-1 h-1.5 bg-[#E9E4DB] rounded-full overflow-hidden">
+                                                  <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: child.color }}></div>
+                                                </div>
+                                                <span className="text-[9px] font-bold" style={{ color: child.color }}>{pct}%</span>
+                                              </div>
+                                              <span className="text-[9px] text-[#8C8479]">{rec.completed}/{rec.total} | ⭐{rec.points}</span>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      
+                      {/* WEEKLY COMPLETION GRAPH (Bar chart) */}
+                      <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                          <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
+                            <span>📊</span> גרף השלמת משימות - 7 ימים אחרונים
+                          </h4>
+                        </div>
+                        
+                        {/* Bar Chart */}
+                        <div className="flex items-end gap-1 h-48 p-4 bg-[#FAF8F5] rounded-2xl border border-[#E3DCD2]">
+                          {taskHistory.slice(-7).map((day, idx) => {
+                            const dayDate = new Date(day.date);
+                            const dayNames = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+                            const dayName = dayNames[dayDate.getDay()];
+                            const dayNum = dayDate.getDate();
+                            
+                            return (
+                              <div key={idx} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                                {/* Bars per child */}
+                                <div className="flex gap-0.5 items-end flex-1 w-full justify-center">
+                                  {CHILDREN.map(child => {
+                                    const record = day.children[child.id];
+                                    const pct = record ? Math.round((record.completed / record.total) * 100) : 0;
+                                    return (
+                                      <div
+                                        key={child.id}
+                                        className="w-3 rounded-t-sm transition-all duration-300"
+                                        style={{ 
+                                          height: `${pct}%`, 
+                                          backgroundColor: child.color,
+                                          minHeight: '4px',
+                                          opacity: pct > 0 ? 1 : 0.2
+                                        }}
+                                        title={`${child.name}: ${pct}%`}
+                                      ></div>
+                                    );
+                                  })}
+                                </div>
+                                {/* Day label */}
+                                <div className="text-center">
+                                  <span className="text-[9px] font-bold text-[#8C8479] block">{dayName}</span>
+                                  <span className="text-[8px] text-[#8C8479]">{dayNum}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Legend */}
+                        <div className="flex gap-3 justify-center flex-wrap">
+                          {CHILDREN.map(child => (
+                            <div key={child.id} className="flex items-center gap-1">
+                              <div className="w-3 h-3 rounded" style={{ backgroundColor: child.color }}></div>
+                              <span className="text-[10px] font-bold text-[#5D4037]">{child.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* POINTS TREND (Line-like chart using dots) */}
+                      <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                          <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
+                            <span>⭐</span> נקודות שנצברו - 14 ימים אחרונים
+                          </h4>
+                        </div>
+                        
+                        <div className="space-y-3">
+                          {CHILDREN.map(child => {
+                            const last14 = taskHistory.slice(-14);
+                            const maxPoints = Math.max(...last14.map(d => d.children[child.id]?.points || 0), 1);
+                            return (
+                              <div key={child.id} className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <img src={child.photo} alt={child.name} className="w-5 h-5 rounded-full object-cover object-top border" style={{ borderColor: child.color }} />
+                                  <span className="text-xs font-bold text-[#5D4037]">{child.name}</span>
+                                  <span className="text-[10px] text-[#8C8479]">
+                                    סה״כ: {last14.reduce((acc, d) => acc + (d.children[child.id]?.points || 0), 0)} נק׳
+                                  </span>
+                                </div>
+                                <div className="flex items-end gap-0.5 h-8 bg-[#FAF8F5] rounded-lg p-1 border border-[#E3DCD2]">
+                                  {last14.map((day, i) => {
+                                    const pts = day.children[child.id]?.points || 0;
+                                    const h = Math.max(4, (pts / maxPoints) * 100);
+                                    return (
+                                      <div
+                                        key={i}
+                                        className="flex-1 rounded-t-sm transition-all"
+                                        style={{ height: `${h}%`, backgroundColor: child.color, opacity: 0.7 }}
+                                        title={`${day.date}: ${pts} נק׳`}
+                                      ></div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* CALENDAR VIEW - 30 days */}
+                      <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                          <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
+                            <span>📅</span> לוח שנה - חודש אחרון
+                          </h4>
+                        </div>
+                        
+                        {/* Calendar grid */}
+                        <div className="grid grid-cols-7 gap-1.5">
+                          {/* Day headers */}
+                          {['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'].map(d => (
+                            <div key={d} className="text-center text-[10px] font-bold text-[#8C8479] py-1">{d}</div>
+                          ))}
+                          
+                          {/* Fill empty days at start */}
+                          {(() => {
+                            const firstDay = taskHistory.length > 0 ? new Date(taskHistory[0].date).getDay() : 0;
+                            return Array.from({ length: firstDay }).map((_, i) => (
+                              <div key={`empty-${i}`} className="aspect-square"></div>
+                            ));
+                          })()}
+                          
+                          {/* Day cells */}
+                          {taskHistory.slice(-30).map((day, idx) => {
+                            const date = new Date(day.date);
+                            const dayChildren = Object.values(day.children) as { completed: number; total: number; points: number }[];
+                            const totalCompleted = dayChildren.reduce((acc, c) => acc + c.completed, 0);
+                            const totalAll = dayChildren.reduce((acc, c) => acc + c.total, 0);
+                            const pct = totalAll > 0 ? Math.round((totalCompleted / totalAll) * 100) : 0;
+                            const isToday = day.date === new Date().toISOString().split('T')[0];
+                            
+                            let bgColor = 'bg-red-100 border-red-200';
+                            let emoji = '😟';
+                            if (pct >= 90) { bgColor = 'bg-green-100 border-green-300'; emoji = '🌟'; }
+                            else if (pct >= 70) { bgColor = 'bg-yellow-100 border-yellow-200'; emoji = '😊'; }
+                            else if (pct >= 50) { bgColor = 'bg-orange-100 border-orange-200'; emoji = '😐'; }
+                            
+                            return (
+                              <div
+                                key={idx}
+                                className={`aspect-square rounded-lg border p-1 flex flex-col items-center justify-center text-center transition-all ${bgColor} ${isToday ? 'ring-2 ring-[#8A9A5B] ring-offset-1' : ''}`}
+                                title={`${day.date}: ${pct}% (${totalCompleted}/${totalAll})`}
+                              >
+                                <span className="text-[9px] font-bold text-[#5D4037]">{date.getDate()}</span>
+                                <span className="text-sm">{emoji}</span>
+                                <span className="text-[8px] font-bold text-[#8C8479]">{pct}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Legend */}
+                        <div className="flex gap-3 justify-center flex-wrap pt-2 border-t border-[#F2EDE4]">
+                          <span className="text-[10px] flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300"></span> 90%+ 🌟</span>
+                          <span className="text-[10px] flex items-center gap-1"><span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-200"></span> 70-89% 😊</span>
+                          <span className="text-[10px] flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-100 border border-orange-200"></span> 50-69% 😐</span>
+                          <span className="text-[10px] flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-200"></span> &lt;50% 😟</span>
+                        </div>
+                      </div>
+
+                      {/* PER-CHILD STATS SUMMARY */}
+                      <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                          <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
+                            <span>📈</span> סיכום ביצועים לפי ילד
+                          </h4>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                          {CHILDREN.map(child => {
+                            const last30 = taskHistory.slice(-30);
+                            const totalCompleted = last30.reduce((acc, d) => acc + (d.children[child.id]?.completed || 0), 0);
+                            const totalAll = last30.reduce((acc, d) => acc + (d.children[child.id]?.total || 0), 0);
+                            const avgPct = totalAll > 0 ? Math.round((totalCompleted / totalAll) * 100) : 0;
+                            const totalPts = last30.reduce((acc, d) => acc + (d.children[child.id]?.points || 0), 0);
+                            const bestDay = last30.reduce((best, d) => {
+                              const rec = d.children[child.id];
+                              if (!rec) return best;
+                              const pct = rec.total > 0 ? rec.completed / rec.total : 0;
+                              return pct > best.pct ? { pct, date: d.date } : best;
+                            }, { pct: 0, date: '' });
+                            const daysAbove80 = last30.filter(d => {
+                              const rec = d.children[child.id];
+                              return rec && rec.total > 0 && (rec.completed / rec.total) >= 0.8;
+                            }).length;
+
+                            return (
+                              <div key={child.id} className="p-4 rounded-2xl border space-y-3" style={{ borderColor: child.color + '40', backgroundColor: child.color + '08' }}>
+                                <div className="flex items-center gap-2">
+                                  <img src={child.photo} alt={child.name} className="w-8 h-8 rounded-full object-cover object-top border-2" style={{ borderColor: child.color }} />
+                                  <div>
+                                    <h5 className="font-bold text-sm text-[#5D4037]">{child.name}</h5>
+                                    <p className="text-[10px] text-[#8C8479]">30 ימים אחרונים</p>
+                                  </div>
+                                </div>
+                                
+                                <div className="space-y-1.5">
+                                  <div className="flex justify-between text-[10px]">
+                                    <span className="text-[#8C8479]">ממוצע השלמה:</span>
+                                    <span className="font-bold" style={{ color: child.color }}>{avgPct}%</span>
+                                  </div>
+                                  <div className="h-2 bg-[#E9E4DB] rounded-full overflow-hidden">
+                                    <div className="h-full rounded-full transition-all" style={{ width: `${avgPct}%`, backgroundColor: child.color }}></div>
+                                  </div>
+                                  <div className="flex justify-between text-[10px]">
+                                    <span className="text-[#8C8479]">סה״כ נקודות:</span>
+                                    <span className="font-bold text-indigo-700">⭐ {totalPts}</span>
+                                  </div>
+                                  <div className="flex justify-between text-[10px]">
+                                    <span className="text-[#8C8479]">ימים מעל 80%:</span>
+                                    <span className="font-bold text-green-700">{daysAbove80}/30</span>
+                                  </div>
+                                  <div className="flex justify-between text-[10px]">
+                                    <span className="text-[#8C8479]">היום הכי טוב:</span>
+                                    <span className="font-bold text-amber-700">{bestDay.date ? `${Math.round(bestDay.pct * 100)}%` : '-'}</span>
+                                  </div>
+                                  <div className="flex justify-between text-[10px]">
+                                    <span className="text-[#8C8479]">רצף נוכחי:</span>
+                                    <span className="font-bold text-orange-600">🔥 {streaks[child.id]?.count || 0} ימים</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB CONTENT: MAIN DASHBOARD - Draggable panels */}
+                  {parentTab === 'dashboard' && (<div className="space-y-8 flex flex-col">
+                  
+                  {/* Kids Tracker */}
+                  <div style={{ order: panelOrder.indexOf('tracker') }} 
+                    draggable onDragStart={() => handlePanelDragStart('tracker')} onDragOver={(e) => handlePanelDragOver(e, 'tracker')} onDrop={() => handlePanelDrop('tracker')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'tracker' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'tracker' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
+                  <div className="bg-white rounded-3xl border border-[#D6CFC4] shadow-sm overflow-hidden">
+                    <div className="flex items-center">
+                      <div className="px-3 py-4 cursor-grab active:cursor-grabbing text-[#D6CFC4] hover:text-[#8C8479] select-none" title="גרור לשינוי סדר">⠿</div>
+                      <button onClick={() => togglePanel('tracker')} className="flex-1 p-4 pl-0 flex items-center justify-between hover:bg-[#FAF8F5] transition-all">
+                        <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">📊 מעקב ילדים בזמן אמת</h4>
+                        <span className={`text-[#8C8479] transition-transform ${collapsedPanels['tracker'] ? '' : 'rotate-180'}`}>▼</span>
+                      </button>
+                    </div>
+                    {!collapsedPanels['tracker'] && (
+                  <div className="px-4 pb-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     {CHILDREN.map((child) => {
                       const stats = getChildProgress(child.id);
@@ -1438,6 +2172,9 @@ export default function App() {
                               🎮 זמן מסך: {stats.screenTime.earned > 0 ? `${stats.screenTime.earned} דק׳` : `0 / ${stats.screenTime.base} דק׳`}
                               {stats.screenTime.bonus > 0 && ` (+${stats.screenTime.bonus} בונוס)`}
                             </p>
+                            <p className="text-[10px] text-indigo-700 font-bold">
+                              ⭐ נקודות: {childPoints[child.id] || 0} | 🔥 רצף: {streaks[child.id]?.count || 0} ימים
+                            </p>
                             <p className="text-[10px] text-amber-700 font-bold">
                               😊 סמיילים: {smileyCount[child.id] || 0} | 🎁 מתנות: {giftsRedeemed[child.id] || 0}
                             </p>
@@ -1457,16 +2194,36 @@ export default function App() {
                             >
                               אפס משימות 🔄
                             </button>
+                            <button
+                              onClick={() => setChildPoints(prev => ({ ...prev, [child.id]: (prev[child.id] || 0) + 10 }))}
+                              className="py-1 px-2 border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-[10px] font-bold transition-all text-center"
+                            >
+                              +10 נקודות ⭐
+                            </button>
+                            <button
+                              onClick={() => setChildPoints(prev => ({ ...prev, [child.id]: Math.max(0, (prev[child.id] || 0) - 10) }))}
+                              className="py-1 px-2 border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg text-[10px] font-bold transition-all text-center"
+                            >
+                              -10 נקודות 📉
+                            </button>
                           </div>
                         </div>
                       )
                     })}
                   </div>
+                  </div>
+                    )}
+                  </div>
+                  </div>
 
-
-                  {/* PHOTO PROOFS REVIEW PANEL */}
+                    {/* Photos */}
+                    <div style={{ order: panelOrder.indexOf('photos') }}
+                      draggable onDragStart={() => handlePanelDragStart('photos')} onDragOver={(e) => handlePanelDragOver(e, 'photos')} onDrop={() => handlePanelDrop('photos')} onDragEnd={handlePanelDragEnd}
+                      className={`transition-all duration-200 ${draggedPanel === 'photos' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'photos' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
                   <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-6">
-                      <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="cursor-grab active:cursor-grabbing text-[#D6CFC4] hover:text-[#8C8479] select-none" title="גרור">⠿</div>
+                        <div className="flex-1 flex items-center justify-between border-b border-[#F2EDE4] pb-3">
                         <div className="flex items-center gap-2">
                           <Camera className="w-5 h-5 text-green-700" />
                           <h4 className="font-bold text-[#5D4037] text-lg">לוח בקרת אישור תמונות של הילדים</h4>
@@ -1572,194 +2329,65 @@ export default function App() {
                         })()}
                       </div>
                     </div>
-
-                  {/* SCREEN TIME LOCK AUTOMATION PANEL */}
-                  <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-6">
-                    <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
-                      <div className="flex items-center gap-2">
-                        <Monitor className="w-5 h-5 text-indigo-600" />
-                        <h4 className="font-bold text-[#5D4037] text-lg">ניהול זמן מסך ונעילת מחשב אוטומטית</h4>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 ${
-                          lockServerConnected 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-red-100 text-red-700'
-                        }`}>
-                          <span className={`inline-block w-2 h-2 rounded-full ${lockServerConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
-                          {lockServerConnected ? 'שרת נעילה מחובר' : 'שרת נעילה לא זמין'}
-                        </span>
-                        <button
-                          onClick={lockComputerNow}
-                          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                        >
-                          <Lock className="w-3.5 h-3.5" />
-                          <span>נעל מחשב עכשיו</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-[#8C8479] leading-relaxed">
-                      הגדירו זמן מסך לכל ילד. לאחר סיום הזמן המוקצב, המחשב יינעל אוטומטית.
-                      הפעילו את שרת הנעילה בטרמינל: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-indigo-700 font-mono text-[10px]">npm run lock-server</code>
-                    </p>
-
-                    {!lockServerConnected && (
-                      <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                        <div className="text-xs text-amber-900 space-y-1">
-                          <p className="font-bold">שרת הנעילה אינו פעיל</p>
-                          <p>כדי שהאוטומציה תעבוד, הפעילו את שרת הנעילה:</p>
-                          <code className="block bg-white px-3 py-2 rounded-xl border border-amber-300 font-mono text-[11px] text-amber-800 mt-1">
-                            npm run lock-server
-                          </code>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Timer cards per child */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                      {CHILDREN.map((child) => {
-                        const timer = screenTimers[child.id];
-                        const isActive = timer && !timer.locked && timer.remainingMs > 0;
-                        const isExpired = timer && (timer.locked || timer.remainingMs <= 0);
-                        const remainingMin = timer ? timer.remainingMs / 60000 : 0;
-                        const isWarning = isActive && remainingMin <= 5;
-
-                        return (
-                          <div key={child.id} className={`p-4 rounded-2xl border space-y-3 transition-all ${
-                            isActive 
-                              ? isWarning 
-                                ? 'bg-red-50 border-red-300 shadow-md' 
-                                : 'bg-green-50 border-green-300 shadow-md'
-                              : isExpired
-                              ? 'bg-slate-100 border-slate-300'
-                              : 'bg-white border-[#D6CFC4]'
-                          }`}>
-                            {/* Child header */}
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <img src={child.photo} alt={child.name} className="w-7 h-7 rounded-full object-cover object-top" />
-                                <span className="font-bold text-sm text-[#4A4540]">{child.name}</span>
-                              </div>
-                              {isActive && (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse ${
-                                  isWarning ? 'bg-red-200 text-red-800' : 'bg-green-200 text-green-800'
-                                }`}>
-                                  {isWarning ? '⚠️ כמעט נגמר!' : '🟢 פעיל'}
-                                </span>
-                              )}
-                              {isExpired && (
-                                <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
-                                  🔒 ננעל
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Active timer display */}
-                            {isActive && timer && (
-                              <div className="text-center space-y-2">
-                                <div className={`text-3xl font-mono font-bold tracking-wider py-2 px-3 rounded-xl ${
-                                  isWarning ? 'text-red-700 bg-red-100' : 'text-green-700 bg-green-100'
-                                }`}>
-                                  {timer.remainingFormatted}
-                                </div>
-                                <div className="flex gap-1.5 justify-center">
-                                  <button
-                                    onClick={() => extendScreenTimer(child.id, 10)}
-                                    className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                    <span>10 דק׳</span>
-                                  </button>
-                                  <button
-                                    onClick={() => extendScreenTimer(child.id, 30)}
-                                    className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                    <span>30 דק׳</span>
-                                  </button>
-                                  <button
-                                    onClick={() => stopScreenTimer(child.id)}
-                                    className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg text-[10px] font-bold transition-all"
-                                  >
-                                    ⏹️ עצור
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Set timer (not active) */}
-                            {!isActive && (
-                              <div className="space-y-2">
-                                <div className="flex items-center gap-2">
-                                  <button 
-                                    onClick={() => setTimerMinutesInput(prev => ({ ...prev, [child.id]: Math.max(5, (prev[child.id] || 30) - 5) }))}
-                                    className="p-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all"
-                                  >
-                                    <Minus className="w-3.5 h-3.5 text-slate-700" />
-                                  </button>
-                                  <div className="flex-1 text-center">
-                                    <span className="text-lg font-mono font-bold text-[#5D4037]">{timerMinutesInput[child.id] || 30}</span>
-                                    <span className="text-[10px] text-[#8C8479] block">דקות</span>
-                                  </div>
-                                  <button 
-                                    onClick={() => setTimerMinutesInput(prev => ({ ...prev, [child.id]: Math.min(180, (prev[child.id] || 30) + 5) }))}
-                                    className="p-1 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all"
-                                  >
-                                    <Plus className="w-3.5 h-3.5 text-slate-700" />
-                                  </button>
-                                </div>
-
-                                {/* Quick time presets */}
-                                <div className="flex gap-1 justify-center">
-                                  {[15, 30, 45, 60, 90].map(min => (
-                                    <button
-                                      key={min}
-                                      onClick={() => setTimerMinutesInput(prev => ({ ...prev, [child.id]: min }))}
-                                      className={`px-2 py-0.5 rounded-md text-[9px] font-bold transition-all ${
-                                        timerMinutesInput[child.id] === min
-                                          ? 'bg-[#8A9A5B] text-white'
-                                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                      }`}
-                                    >
-                                      {min} דק׳
-                                    </button>
-                                  ))}
-                                </div>
-
-                                <button
-                                  onClick={() => startScreenTimer(child.id)}
-                                  disabled={!lockServerConnected}
-                                  className="w-full py-2 bg-[#8A9A5B] hover:bg-[#6A7B42] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                                >
-                                  <Timer className="w-3.5 h-3.5" />
-                                  <span>הפעל טיימר</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Lock server status message */}
-                    {lockServerMessage && (
-                      <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2 ${
-                        lockServerMessage.error 
-                          ? 'bg-red-50 border-red-200 text-red-800' 
-                          : 'bg-green-50 border-green-200 text-green-800'
-                      }`}>
-                        <span className="shrink-0">{lockServerMessage.error ? '❌' : '⚡'}</span>
-                        <span className="flex-1">{lockServerMessage.text}</span>
-                        <button onClick={() => setLockServerMessage(null)} className="text-[10px] opacity-70 hover:opacity-100">✕</button>
-                      </div>
-                    )}
+                  </div>
                   </div>
 
-                  {/* SMILEY & GIFT MANAGEMENT PANEL */}
+                    {/* Smileys */}
+                    <div style={{ order: panelOrder.indexOf('smileys') }}
+                      draggable onDragStart={() => handlePanelDragStart('smileys')} onDragOver={(e) => handlePanelDragOver(e, 'smileys')} onDrop={() => handlePanelDrop('smileys')} onDragEnd={handlePanelDragEnd}
+                      className={`transition-all duration-200 ${draggedPanel === 'smileys' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'smileys' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
+
+                    {/* Daily duty rotation panel */}
+                    <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-4 mb-4">
+                      <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">🎲</span>
+                          <h4 className="font-bold text-[#5D4037] text-lg">גלגול משימות בית יומי</h4>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const today = new Date().toISOString().split('T')[0];
+                            localStorage.removeItem(`hallel_daily_duties_${today}`);
+                            const newAssignments = getDailyDutyAssignments();
+                            setDailyDutyAssignments(newAssignments);
+                            // Rebuild tasks with new assignments
+                            const t: Record<string, Task[]> = {};
+                            CHILDREN.forEach(c => { t[c.id] = getTasksForToday(c.id); });
+                            setTasks(t);
+                          }}
+                          className="px-3 py-1.5 bg-[#8A9A5B] hover:bg-[#6A7B42] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
+                          title="הגרל מחדש משימות היום"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>הגרל מחדש</span>
+                        </button>
+                      </div>
+                      <p className="text-xs text-[#8C8479]">כל יום נבחר באקראי ילד שיבצע כל משימת בית כללית. הגרלה חדשה מתרחשת אוטומטית בחצות.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {SHARED_DUTIES.map(duty => {
+                          const assignedId = dailyDutyAssignments[duty.id];
+                          const assignedChild = CHILDREN.find(c => c.id === assignedId);
+                          if (!assignedChild) return null;
+                          return (
+                            <div key={duty.id} className="flex items-center gap-3 p-3 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2]">
+                              <span className="text-lg">{duty.emoji}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-[#4A4540] truncate">{duty.title}</p>
+                                <p className="text-[10px] text-[#8C8479]">{duty.time === 'afternoon' ? 'אחה"צ' : 'ערב'} • {duty.mandatory ? 'חובה' : 'רשות'}</p>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <img src={assignedChild.photo} alt={assignedChild.name} className="w-6 h-6 rounded-full object-cover object-top border" style={{ borderColor: assignedChild.color }} />
+                                <span className="text-xs font-bold" style={{ color: assignedChild.color }}>{assignedChild.name}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                   <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-6">
-                    <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                    <div className="flex items-center gap-2 border-b border-[#F2EDE4] pb-3">
+                      <div className="cursor-grab active:cursor-grabbing text-[#D6CFC4] hover:text-[#8C8479] select-none" title="גרור">⠿</div>
                       <div className="flex items-center gap-2">
                         <Smile className="w-5 h-5 text-amber-500" />
                         <h4 className="font-bold text-[#5D4037] text-lg">ניהול סמיילים ומתנות</h4>
@@ -1802,15 +2430,52 @@ export default function App() {
                       ))}
                     </div>
                   </div>
+                  </div>
 
-                  {/* PARENT TASK EDITOR */}
-                  <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-6">
-                    <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
-                      <div className="flex items-center gap-2">
+                  {/* Task Editor */}
+                  <div style={{ order: panelOrder.indexOf('editor') }}
+                    draggable onDragStart={() => handlePanelDragStart('editor')} onDragOver={(e) => handlePanelDragOver(e, 'editor')} onDrop={() => handlePanelDrop('editor')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'editor' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'editor' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
+                  <div className="bg-white rounded-3xl border border-[#D6CFC4] shadow-sm overflow-hidden">
+                    <button onClick={() => togglePanel('editor')} className="w-full p-4 flex items-center justify-between hover:bg-[#FAF8F5] transition-all">
+                      <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
                         <Edit3 className="w-5 h-5 text-[#8A9A5B]" />
-                        <h4 className="font-bold text-[#5D4037] text-lg">עריכת משימות לפי ילד</h4>
-                      </div>
+                        עריכת משימות לפי ילד ויום
+                      </h4>
+                      <span className={`text-[#8C8479] transition-transform ${collapsedPanels['editor'] ? '' : 'rotate-180'}`}>▼</span>
+                    </button>
+                    {!collapsedPanels['editor'] && (
+                    <div className="p-6 pt-0 space-y-4">
+
+                    {/* Day-of-week selector */}
+                    <div className="flex flex-wrap gap-1.5 bg-[#FAF8F5] p-2 rounded-xl border border-[#E3DCD2]">
+                      <span className="text-[10px] font-bold text-[#8C8479] flex items-center px-2">📅 יום:</span>
+                      {([
+                        ['today', '📌 היום'],
+                        ['0', 'א׳ ראשון'],
+                        ['1', 'ב׳ שני'],
+                        ['2', 'ג׳ שלישי'],
+                        ['3', 'ד׳ רביעי'],
+                        ['4', 'ה׳ חמישי'],
+                        ['5', '🕯️ ו׳ שישי'],
+                      ] as [EditDay, string][]).map(([key, label]) => (
+                        <button
+                          key={key}
+                          onClick={() => setEditDayOfWeek(key)}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                            editDayOfWeek === key
+                              ? key === '5' ? 'bg-amber-500 text-white shadow-sm' : 'bg-[#8A9A5B] text-white shadow-sm'
+                              : 'bg-white text-[#5D4037] hover:bg-[#E9E4DB] border border-[#D6CFC4]'
+                          }`}
+                        >{label}</button>
+                      ))}
                     </div>
+
+                    {editDayOfWeek === '5' && (
+                      <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs text-amber-800">
+                        🕯️ <strong>עריכת משימות ערב שבת</strong> — משימות אלה ייטענו אוטומטית ביום שישי
+                      </div>
+                    )}
 
                     {/* Child selector for editing */}
                     <div className="flex gap-2 flex-wrap">
@@ -1834,7 +2499,10 @@ export default function App() {
                       <div className="space-y-4">
                         {/* Add new task form */}
                         <div className="bg-[#FAF8F5] p-4 rounded-2xl border border-[#D6CFC4] space-y-3">
-                          <h5 className="text-xs font-bold text-[#5D4037]">הוספת משימה חדשה ל{CHILDREN.find(c => c.id === editingChildId)?.name}:</h5>
+                          <h5 className="text-xs font-bold text-[#5D4037]">
+                            הוספת משימה ל{CHILDREN.find(c => c.id === editingChildId)?.name}
+                            {editDayOfWeek === '5' ? ' (יום שישי)' : editDayOfWeek === 'today' ? ' (היום)' : ` (${['ראשון','שני','שלישי','רביעי','חמישי'][parseInt(editDayOfWeek)]})`}:
+                          </h5>
                           <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                             <input
                               type="text"
@@ -1849,8 +2517,8 @@ export default function App() {
                               className="px-3 py-2 bg-white border border-[#D6CFC4] rounded-xl text-xs"
                             >
                               <option value="morning">🌅 בוקר</option>
-                              <option value="afternoon">🌞 צהריים</option>
-                              <option value="evening">🌙 ערב</option>
+                              <option value="afternoon">{editDayOfWeek === '5' ? '🕯️ הכנות לשבת' : '🌞 צהריים'}</option>
+                              <option value="evening">{editDayOfWeek === '5' ? '✨ ערב שבת' : '🌙 ערב'}</option>
                             </select>
                             <div className="flex items-center gap-2">
                               <input
@@ -1872,7 +2540,7 @@ export default function App() {
                             </div>
                           </div>
                           <button
-                            onClick={() => addTask(editingChildId)}
+                            onClick={() => addTaskToDay(editingChildId, editDayOfWeek)}
                             disabled={!newTaskTitle.trim()}
                             className="px-4 py-2 bg-[#8A9A5B] hover:bg-[#6A7B42] disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
                           >
@@ -1881,48 +2549,68 @@ export default function App() {
                           </button>
                         </div>
 
-                        {/* Existing tasks list */}
-                        <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
-                          {(['morning', 'afternoon', 'evening'] as TimeOfDay[]).map(time => (
+                        {/* Existing tasks list for selected day */}
+                        <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
+                          {(['morning', 'afternoon', 'evening'] as TimeOfDay[]).map(time => {
+                            const dayTasks = getTasksForDayOfWeek(editingChildId, editDayOfWeek).filter(t => t.time === time);
+                            if (dayTasks.length === 0) return null;
+                            return (
                             <div key={time} className="space-y-1">
                               <h6 className="text-[10px] font-bold text-[#8C8479] uppercase border-b border-[#F2EDE4] pb-1">
-                                {time === 'morning' ? '🌅 בוקר' : time === 'afternoon' ? '🌞 צהריים' : '🌙 ערב'}
+                                {time === 'morning' ? '🌅 בוקר' : time === 'afternoon' ? (editDayOfWeek === '5' ? '🕯️ הכנות לשבת' : '🌞 צהריים') : (editDayOfWeek === '5' ? '✨ ערב שבת' : '🌙 ערב')}
                               </h6>
-                              {(tasks[editingChildId] || []).filter(t => t.time === time).map(task => (
-                                <div key={task.id} className="flex items-center justify-between bg-[#FAF8F5] p-2.5 rounded-xl border border-[#E3DCD2]">
+                              {dayTasks.map(task => {
+                                const isCustom = task.id.startsWith('custom_');
+                                return (
+                                <div key={task.id} className={`flex items-center justify-between p-2.5 rounded-xl border ${isCustom ? 'bg-indigo-50/50 border-indigo-200' : 'bg-[#FAF8F5] border-[#E3DCD2]'}`}>
                                   <div className="flex items-center gap-2">
                                     <span className="text-lg">{task.emoji}</span>
                                     <span className="text-xs font-bold text-[#4A4540]">{task.title}</span>
                                     <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${task.mandatory ? 'bg-[#D35400]/10 text-[#D35400]' : 'bg-[#8A9A5B]/10 text-[#8A9A5B]'}`}>
                                       {task.mandatory ? 'חובה' : 'רשות'}
                                     </span>
+                                    {isCustom && <span className="text-[8px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-bold">מותאם</span>}
                                   </div>
                                   <div className="flex items-center gap-1">
-                                    <button
-                                      onClick={() => toggleTaskMandatory(editingChildId, task.id)}
-                                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-[9px] font-bold text-slate-700 transition-all"
-                                    >
-                                      {task.mandatory ? 'הפוך לרשות' : 'הפוך לחובה'}
-                                    </button>
-                                    <button
-                                      onClick={() => removeTask(editingChildId, task.id)}
-                                      className="p-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition-all"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
+                                    {editDayOfWeek === 'today' && (
+                                      <button
+                                        onClick={() => toggleTaskMandatory(editingChildId, task.id)}
+                                        className="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-[9px] font-bold text-slate-700 transition-all"
+                                      >
+                                        {task.mandatory ? 'רשות' : 'חובה'}
+                                      </button>
+                                    )}
+                                    {isCustom && (
+                                      <button
+                                        onClick={() => removeTaskFromDay(editingChildId, task.id, editDayOfWeek)}
+                                        className="p-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition-all"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
+                    </div>
+                    )}
+                  </div>
                   </div>
 
-                  {/* MASHOV INTEGRATION SETTINGS */}
+                  {/* Mashov */}
+                  <div style={{ order: panelOrder.indexOf('mashov') }}
+                    draggable onDragStart={() => handlePanelDragStart('mashov')} onDragOver={(e) => handlePanelDragOver(e, 'mashov')} onDrop={() => handlePanelDrop('mashov')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'mashov' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'mashov' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
                   <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-6">
-                    <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                    <div className="flex items-center gap-2 border-b border-[#F2EDE4] pb-3">
+                      <div className="cursor-grab active:cursor-grabbing text-[#D6CFC4] hover:text-[#8C8479] select-none" title="גרור">⠿</div>
+                      <div className="flex-1 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <BookOpen className="w-5 h-5 text-indigo-600" />
                         <h4 className="font-bold text-[#5D4037] text-lg">חיבור למערכת משוב (Mashov)</h4>
@@ -1935,6 +2623,7 @@ export default function App() {
                       >
                         פתח משוב ↗
                       </a>
+                    </div>
                     </div>
 
                     <p className="text-xs text-[#8C8479] leading-relaxed">
@@ -2001,8 +2690,12 @@ export default function App() {
                       <p>הפרטים נשמרים רק בדפדפן שלכם (localStorage) ולא נשלחים לשום שרת חיצוני. החיבור מתבצע ישירות מהאפליקציה למשוב.</p>
                     </div>
                   </div>
+                  </div>
 
-                  {/* LOWER TABS FOR SPECIFICATIONS AND TECHNICAL INTEGRATIONS */}
+                  {/* Technical */}
+                  <div style={{ order: panelOrder.indexOf('technical') }}
+                    draggable onDragStart={() => handlePanelDragStart('technical')} onDragOver={(e) => handlePanelDragOver(e, 'technical')} onDrop={() => handlePanelDrop('technical')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'technical' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'technical' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     
                     {/* Database & AppSheet Setup spec */}
@@ -2103,6 +2796,8 @@ function syncMashovToAppSheet() {
                     </div>
 
                   </div>
+                  </div>
+                  </div>)}
 
                 </div>
               )}
@@ -2337,6 +3032,116 @@ function syncMashovToAppSheet() {
               >
                 תודה! 🌟
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 4. PRIZE STORE MODAL */}
+      <AnimatePresence>
+        {showPrizeStore && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4" dir="rtl">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-3xl border-2 border-purple-300 shadow-2xl p-6 max-w-lg w-full max-h-[85vh] overflow-y-auto space-y-4 relative"
+            >
+              <button
+                onClick={() => setShowPrizeStore(false)}
+                className="absolute top-3 left-3 p-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-700 z-10 border border-red-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="text-center space-y-1">
+                <h2 className="text-2xl font-bold text-purple-800">🏪 חנות הפרסים</h2>
+                <p className="text-sm text-purple-600">
+                  {activeChild.name} — יתרה: <span className="font-bold text-lg">{childPoints[activeChildId] || 0}</span> נקודות ⭐
+                </p>
+                {(streaks[activeChildId]?.count || 0) > 0 && (
+                  <p className="text-xs text-orange-600 font-bold">
+                    🔥 רצף של {streaks[activeChildId]?.count} ימים! (+{STREAK_BONUS_PER_DAY} נק׳ בונוס לכל משימה)
+                  </p>
+                )}
+              </div>
+
+              {/* Prize categories */}
+              {(['screen', 'privilege', 'treat', 'family'] as const).map(category => {
+                const categoryNames: Record<string, { name: string; emoji: string }> = {
+                  screen: { name: 'זמן מסך', emoji: '📱' },
+                  privilege: { name: 'פריבילגיות', emoji: '👑' },
+                  treat: { name: 'פינוקים', emoji: '🍬' },
+                  family: { name: 'פעילות משפחתית', emoji: '👨‍👩‍👧‍👦' },
+                };
+                const prizes = PRIZE_STORE.filter(p => p.category === category);
+                return (
+                  <div key={category} className="space-y-2">
+                    <h3 className="text-sm font-bold text-purple-700 flex items-center gap-1 border-b border-purple-200 pb-1">
+                      <span>{categoryNames[category].emoji}</span>
+                      <span>{categoryNames[category].name}</span>
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      {prizes.map(prize => {
+                        const canAfford = (childPoints[activeChildId] || 0) >= prize.cost;
+                        return (
+                          <button
+                            key={prize.id}
+                            onClick={() => {
+                              if (canAfford) {
+                                redeemPrize(activeChildId, prize);
+                              }
+                            }}
+                            disabled={!canAfford}
+                            className={`p-3 rounded-xl border text-center transition-all space-y-1 ${
+                              canAfford 
+                                ? 'bg-white border-purple-200 hover:border-purple-400 hover:shadow-md cursor-pointer' 
+                                : 'bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed'
+                            }`}
+                          >
+                            <span className="text-2xl block">{prize.emoji}</span>
+                            <span className="text-[11px] font-bold text-purple-800 block">{prize.name}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              canAfford ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-500'
+                            }`}>
+                              {prize.cost} נק׳
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Recent redemptions */}
+              {(redeemedPrizes[activeChildId] || []).length > 0 && (
+                <div className="border-t border-purple-200 pt-3 space-y-1">
+                  <h4 className="text-xs font-bold text-purple-600">🎁 פרסים אחרונים שנפדו:</h4>
+                  <div className="flex flex-wrap gap-1">
+                    {(redeemedPrizes[activeChildId] || []).slice(-5).reverse().map((r, i) => {
+                      const prize = PRIZE_STORE.find(p => p.id === r.prizeId);
+                      return prize ? (
+                        <span key={i} className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                          {prize.emoji} {prize.name}
+                        </span>
+                      ) : null;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* How to earn more */}
+              <div className="bg-white/60 p-3 rounded-xl border border-purple-100 space-y-1">
+                <h4 className="text-[11px] font-bold text-purple-700">💡 איך צוברים נקודות?</h4>
+                <ul className="text-[10px] text-purple-600 space-y-0.5">
+                  <li>• משימת חובה = {SCREEN_TIME_REWARD[activeChildId]?.pointsPerMandatory || 3} נק׳</li>
+                  <li>• משימת בחירה = {SCREEN_TIME_REWARD[activeChildId]?.pointsPerOptional || 2} נק׳</li>
+                  <li>• בונוס רצף = +{STREAK_BONUS_PER_DAY} נק׳ לכל משימה</li>
+                  <li>• שבוע רצוף = +{STREAK_WEEKLY_BONUS} נק׳ בונוס!</li>
+                  <li>• הצטיינות שבועית (90%+) = +{WEEKLY_EXCELLENCE_BONUS} נק׳</li>
+                </ul>
+              </div>
             </motion.div>
           </div>
         )}
