@@ -35,6 +35,28 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // "Find my tablet" remote alarm command. Any device holding the family
+    // code can read this (a tablet must react no matter which screen it's
+    // showing - it isn't gated behind the parent PIN, which is a client-
+    // side-only concept and isn't visible to Firestore). Writes are shape-
+    // validated the same way as the other sub-documents; there is no
+    // server-enforced distinction between "parent" and "child" here since
+    // this app has no real per-user auth on the family-code sync path -
+    // the Parent Dashboard UI is what keeps the trigger button out of the
+    // child view.
+    match /families/{familyId}/commands/findDevice {
+      allow get: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['findDevice', 'startedAt', 'startedBy', 'volume'])
+        && request.resource.data.findDevice is bool
+        && (request.resource.data.startedAt == null || request.resource.data.startedAt is timestamp)
+        && request.resource.data.startedBy is string
+        && request.resource.data.startedBy.size() < 100
+        && request.resource.data.volume is number
+        && request.resource.data.volume >= 0
+        && request.resource.data.volume <= 1;
+      allow delete: if false;
+    }
+
     // Everything else is denied by default.
   }
 }

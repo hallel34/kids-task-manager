@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useCloudSync } from './hooks/useCloudSync';
-import { useFindDeviceSound } from './hooks/useFindDeviceSound';
+import { useFindDevice } from './hooks/useFindDevice';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
 import { getLocalDateKey } from './utils/date';
 import type { Task, Child, TimeOfDay, ViewMode } from './types';
@@ -345,13 +345,18 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
 
   const { familyCode, setFamilyCode, syncEnabled, setSyncEnabled, syncStatus } = useCloudSync(tasks, setTasks);
 
+  // Subscribes in real time regardless of parent/child view - the device
+  // must ring the moment a family member remotely triggers it, no matter
+  // which screen is currently showing.
   const {
-    isPlaying: isFindDeviceSoundPlaying,
-    play: playFindDeviceSound,
-    stop: stopFindDeviceSound,
+    isRinging: isFindDeviceRinging,
+    isFlashOn: isFindDeviceFlashOn,
+    ringTablet,
+    stopRinging,
     volume: findDeviceVolume,
     setVolume: setFindDeviceVolume,
-  } = useFindDeviceSound();
+    sendError: findDeviceSendError,
+  } = useFindDevice(familyCode, syncEnabled);
 
   const [currentDate, setCurrentDate] = useState<string>('');
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -889,7 +894,12 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#4A4540] font-sans selection:bg-[#E3DCD2] flex flex-col md:flex-row-reverse" dir="rtl">
-      
+
+      {/* Find-the-tablet flash overlay - toggles every 500ms while ringing, on top of whatever screen is currently showing */}
+      {isFindDeviceFlashOn && (
+        <div className="fixed inset-0 z-[9999] bg-red-600/80 pointer-events-none" />
+      )}
+
       {/* SIDEBAR - Collapsible */}
       {!sidebarCollapsed && (
       <aside className="w-full md:w-72 bg-[#E9E4DB] border-l border-[#D6CFC4] flex flex-col p-5 space-y-5 shrink-0 md:h-screen md:sticky md:top-0 h-auto overflow-y-auto relative">
@@ -2855,29 +2865,41 @@ function syncMashovToAppSheet() {
                           <h4 className="font-bold text-[#5D4037] text-lg">איתור הטאבלט</h4>
                         </div>
                         <span className={`text-[11px] rounded-full px-2.5 py-1 font-bold flex items-center gap-1 ${
-                          isFindDeviceSoundPlaying ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                          isFindDeviceRinging ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                         }`}>
-                          {isFindDeviceSoundPlaying ? '🔴 הצליל מתנגן' : '🟢 הצליל כבוי'}
+                          {isFindDeviceRinging ? '🔴 הצליל מתנגן' : '🟢 הצליל כבוי'}
                         </span>
                       </div>
                     </div>
 
                     <p className="text-xs text-[#8C8479] leading-relaxed">
-                      אם הטאבלט הלך לאיבוד בבית, ניתן להשמיע צליל חזק כדי למצוא אותו.
+                      אם הטאבלט הלך לאיבוד בבית, אפשר להפעיל צליל חזק מכל מכשיר מחובר (מהמחשב, מהטלפון וכו') וכל המכשירים המסונכרנים - כולל הטאבלט - ישמיעו אותו מיד.
                     </p>
+
+                    {!syncEnabled && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800">
+                        יש להפעיל קודם "סנכרון בין מכשירים" (בפאנל הסנכרון למעלה) כדי שהמכשירים יוכלו לצלצל אחד לשני.
+                      </div>
+                    )}
+
+                    {findDeviceSendError && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-700">
+                        {findDeviceSendError}
+                      </div>
+                    )}
 
                     <div className="flex gap-2">
                       <button
-                        onClick={playFindDeviceSound}
-                        disabled={isFindDeviceSoundPlaying}
+                        onClick={ringTablet}
+                        disabled={!syncEnabled || isFindDeviceRinging}
                         className="flex-1 px-4 py-2.5 bg-[#8A9A5B] hover:bg-[#6A7B42] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                       >
                         <span>🔊</span>
                         <span>השמע צליל</span>
                       </button>
                       <button
-                        onClick={stopFindDeviceSound}
-                        disabled={!isFindDeviceSoundPlaying}
+                        onClick={stopRinging}
+                        disabled={!syncEnabled || !isFindDeviceRinging}
                         className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                       >
                         <span>⏹️</span>
