@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { saveTasksToCloud, loadTasksFromCloud } from '../cloudStorage';
+import { getLocalDateKey } from '../utils/date';
 import type { Task } from '../types';
 
 function generateFamilyCode(): string {
@@ -43,12 +44,11 @@ export function useCloudSync(tasks: Record<string, Task[]>, setTasks: Dispatch<S
   // Debounced save whenever tasks change
   useEffect(() => {
     if (!syncEnabled || !familyCode) return;
-    const today = new Date().toISOString().split('T')[0];
     if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
     cloudSaveTimer.current = setTimeout(async () => {
       try {
         setSyncStatus('syncing');
-        await saveTasksToCloud(familyCode, today, tasks);
+        await saveTasksToCloud(familyCode, getLocalDateKey(), tasks);
         lastLocalSave.current = Date.now();
         setSyncStatus('ok');
         setTimeout(() => setSyncStatus('idle'), 3000);
@@ -61,12 +61,11 @@ export function useCloudSync(tasks: Record<string, Task[]>, setTasks: Dispatch<S
   // Poll Firestore every 30 seconds to receive updates from other devices
   useEffect(() => {
     if (!syncEnabled || !familyCode) return;
-    const today = new Date().toISOString().split('T')[0];
     const poll = async () => {
       // Skip if we just saved locally (avoid overwriting our own data)
       if (Date.now() - lastLocalSave.current < 5000) return;
       try {
-        const cloudTasks = await loadTasksFromCloud(familyCode, today);
+        const cloudTasks = await loadTasksFromCloud(familyCode, getLocalDateKey());
         if (cloudTasks) {
           setTasks(cloudTasks as Record<string, Task[]>);
           setSyncStatus('ok');

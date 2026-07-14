@@ -1,4 +1,5 @@
 import type { Task, Child, TimeOfDay } from '../types';
+import { getLocalDateKey } from '../utils/date';
 
 export function safeParseJSON<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
@@ -105,7 +106,7 @@ function _seededRand(seed: number) {
 }
 
 export function getDailyDutyAssignments(): Record<string, string> {
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const today = getLocalDateKey();
   const key = `hallel_daily_duties_${today}`;
   const saved = localStorage.getItem(key);
   if (saved) { try { return JSON.parse(saved); } catch {} }
@@ -274,14 +275,32 @@ export function getSharedDutyTasksFor(childId: string, assignments: Record<strin
     }));
 }
 
+// Single canonical builder for one child's task list on a given day-type
+// (Friday vs. a regular weekday): template + shared-duty rotation (regular
+// days only) + any day-template custom tasks. Every place that builds a
+// day's task list - "today", the day-of-week editor preview, and the
+// nightly regeneration in App.tsx - goes through this so they can't drift
+// apart from one another.
+export function buildTasksForDayType(
+  childId: string,
+  isFriday: boolean,
+  dutyAssignments: Record<string, string>,
+  customDayTasks: Record<string, Task[]>
+): Task[] {
+  const base = isFriday ? getFridayTasksForChild(childId) : getInitialTasksForChild(childId);
+  const shared = isFriday ? [] : getSharedDutyTasksFor(childId, dutyAssignments);
+  const customKey = `${childId}_${isFriday ? 'friday' : 'regular'}`;
+  const custom = customDayTasks[customKey] || [];
+  return [...base, ...shared, ...custom];
+}
+
 // Get tasks based on day of week
 export function getTasksForToday(childId: string): Task[] {
-  const day = new Date().getDay(); // 5 = Friday
-  if (day === 5) return getFridayTasksForChild(childId);
-  const personal = getInitialTasksForChild(childId);
-  const assignments = getDailyDutyAssignments();
-  const shared = getSharedDutyTasksFor(childId, assignments);
-  return [...personal, ...shared];
+  const isFriday = new Date().getDay() === 5;
+  // Friday tasks never use shared-duty rotation, so skip the (cached but
+  // still not-free) lookup entirely on Fridays, same as before.
+  const assignments = isFriday ? {} : getDailyDutyAssignments();
+  return buildTasksForDayType(childId, isFriday, assignments, {});
 }
 
 // Calculate earned screen time for a child - NEW: per-task points system

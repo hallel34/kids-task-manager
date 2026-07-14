@@ -1,7 +1,9 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useCloudSync } from './hooks/useCloudSync';
+import { useFindDeviceSound } from './hooks/useFindDeviceSound';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
+import { getLocalDateKey } from './utils/date';
 import type { Task, Child, TimeOfDay, ViewMode } from './types';
 import {
   safeParseJSON,
@@ -15,11 +17,9 @@ import {
   WEEKLY_EXCELLENCE_BONUS,
   getSchoolEndTime,
   getDailyDutyAssignments,
-  getInitialTasksForChild,
-  getFridayTasksForChild,
-  getSharedDutyTasksFor,
   getTasksForToday,
   getEarnedScreenTime,
+  buildTasksForDayType,
 } from './data/tasksData';
 import type { PrizeItem } from './data/tasksData';
 import { motion, AnimatePresence } from 'motion/react';
@@ -165,19 +165,14 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   // Custom tasks per day-of-week (persisted) - key: `${childId}_${dayNum}` or `${childId}_regular`
   const [customDayTasks, setCustomDayTasks] = useLocalStorage<Record<string, Task[]>>('hallel_custom_day_tasks', {});
 
-  // Get tasks for a specific day-of-week for a child (template + custom)
+  // Get tasks for a specific day-of-week for a child (template + custom).
+  // Delegates to the canonical buildTasksForDayType() (tasksData.ts) so
+  // this preview can never drift from what buildFreshTasksForToday()
+  // actually builds into live state.
   const getTasksForDayOfWeek = (childId: string, day: EditDay): Task[] => {
     if (day === 'today') return tasks[childId] || [];
     const dayNum = parseInt(day);
-    if (dayNum === 5) {
-      const base = getFridayTasksForChild(childId);
-      const custom = customDayTasks[`${childId}_friday`] || [];
-      return [...base, ...custom];
-    }
-    const base = getInitialTasksForChild(childId);
-    const shared = getSharedDutyTasksFor(childId, dailyDutyAssignments);
-    const custom = customDayTasks[`${childId}_regular`] || [];
-    return [...base, ...shared, ...custom];
+    return buildTasksForDayType(childId, dayNum === 5, dailyDutyAssignments, customDayTasks);
   };
 
   // Add task to a specific day template
@@ -242,7 +237,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   const togglePanel = (id: string) => setCollapsedPanels(prev => ({ ...prev, [id]: !prev[id] }));
 
   // --- DASHBOARD PANEL DRAG & DROP ORDER ---
-  const DEFAULT_PANEL_ORDER = ['tracker', 'photos', 'smileys', 'editor', 'mashov', 'technical'];
+  const DEFAULT_PANEL_ORDER = ['tracker', 'photos', 'smileys', 'editor', 'mashov', 'technical', 'findDevice'];
   const [panelOrder, setPanelOrder] = useLocalStorage<string[]>('hallel_panel_order', () => {
     const saved = localStorage.getItem('hallel_panel_order');
     if (saved) {
@@ -302,27 +297,61 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   // Track recently completed tasks (show for 5 seconds before hiding)
   const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set());
 
-  const [tasks, setTasks] = useState<Record<string, Task[]>>(() => {
-    const today = new Date().toISOString().split('T')[0];
-    // Restore today's task completion state if available
-    const saved = safeParseJSON<{ date: string; state: Record<string, Array<{ id: string; completed: boolean; photo?: string; photoTime?: string }>> }>(
-      localStorage.getItem('hallel_tasks_progress'), { date: '', state: {} }
-    );
+  // Build a brand-new task list for today's calendar date: the generated
+  // template (personal + shared-duty, or Friday) plus any day-template
+  // custom tasks a parent added for "regular"/"friday". This is the ONLY
+  // path that should ever be used to (re)create tasks - it must run once
+  // when there is no saved state for today's date, and again if the
+  // calendar date rolls over while the app stays open. Routes through the
+  // same buildTasksForDayType() the day-of-week editor preview uses, so
+  // the two can never disagree about what a given day's tasks are.
+  const buildFreshTasksForToday = (): Record<string, Task[]> => {
+    const isFridayToday = new Date().getDay() === 5;
+    // Friday never uses shared-duty rotation, so skip the lookup on Fridays.
+    const dutyAssignments = isFridayToday ? {} : getDailyDutyAssignments();
     const base: Record<string, Task[]> = {};
     CHILDREN.forEach(c => {
-      base[c.id] = getTasksForToday(c.id);
-      if (saved.date === today && saved.state[c.id]) {
-        const savedMap = Object.fromEntries(saved.state[c.id].map(s => [s.id, s]));
-        base[c.id] = base[c.id].map(t => savedMap[t.id]
-          ? { ...t, completed: savedMap[t.id].completed, photo: savedMap[t.id].photo, photoTime: savedMap[t.id].photoTime }
-          : t
-        );
-      }
+      base[c.id] = buildTasksForDayType(c.id, isFridayToday, dutyAssignments, customDayTasks);
     });
     return base;
+  };
+
+  const [tasks, setTasks] = useState<Record<string, Task[]>>(() => {
+    const today = getLocalDateKey();
+    // Restore today's full task state (completion, photos, mandatory
+    // overrides, custom tasks - everything) if we already have it; only
+    // regenerate when there is nothing saved for today's calendar date.
+    const saved = safeParseJSON<{ date: string; tasks: Record<string, Task[]> } | null>(
+      localStorage.getItem('hallel_tasks_progress'), null
+    );
+    if (saved && saved.date === today && saved.tasks) {
+      // Reconcile against the current CHILDREN roster: every child that
+      // already has saved tasks keeps them completely untouched: only a
+      // child MISSING from the snapshot (e.g. added to CHILDREN after the
+      // snapshot was saved) gets a freshly generated list. This is what
+      // prevents a stale/incomplete snapshot from ever crashing a
+      // roster-wide action like "mark all complete" for that child.
+      const fresh = buildFreshTasksForToday();
+      const reconciled: Record<string, Task[]> = { ...saved.tasks };
+      CHILDREN.forEach(c => {
+        if (!reconciled[c.id]) {
+          reconciled[c.id] = fresh[c.id];
+        }
+      });
+      return reconciled;
+    }
+    return buildFreshTasksForToday();
   });
 
   const { familyCode, setFamilyCode, syncEnabled, setSyncEnabled, syncStatus } = useCloudSync(tasks, setTasks);
+
+  const {
+    isPlaying: isFindDeviceSoundPlaying,
+    play: playFindDeviceSound,
+    stop: stopFindDeviceSound,
+    volume: findDeviceVolume,
+    setVolume: setFindDeviceVolume,
+  } = useFindDeviceSound();
 
   const [currentDate, setCurrentDate] = useState<string>('');
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -338,9 +367,24 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     return () => clearInterval(interval);
   }, []);
 
+  // Regenerate tasks ONLY when the calendar date actually advances (e.g. a
+  // tablet left open past midnight) - never on a time-of-day (morning/
+  // afternoon/evening) change, which is just a display filter and doesn't
+  // touch this state at all. `currentDate` ticks every 60s via the effect
+  // above, so this check runs on the same cadence without polling itself.
+  const todayKeyRef = useRef<string>(getLocalDateKey());
+  useEffect(() => {
+    const nowKey = getLocalDateKey();
+    if (nowKey !== todayKeyRef.current) {
+      todayKeyRef.current = nowKey;
+      setDailyDutyAssignments(getDailyDutyAssignments());
+      setTasks(buildFreshTasksForToday());
+    }
+  }, [currentDate]);
+
   // Save history on end of day (update today's record)
   const updateTodayHistory = useCallback(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateKey();
     setTaskHistory(prev => {
       const existing = prev.find(r => r.date === today);
       const childrenRecord: Record<string, { completed: number; total: number; points: number }> = {};
@@ -363,14 +407,13 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     return () => clearInterval(interval);
   }, [updateTodayHistory]);
 
-  // Save task completion progress for today (survives pull-to-refresh / page reload)
+  // Save today's full task state (survives pull-to-refresh / page reload).
+  // Storing the whole Task objects - not just id/completed - is what lets
+  // this restore completed, photo, photoTime, mandatory overrides and
+  // custom tasks verbatim instead of merging onto a freshly-generated
+  // template.
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const state: Record<string, Array<{ id: string; completed: boolean; photo?: string; photoTime?: string }>> = {};
-    CHILDREN.forEach(c => {
-      state[c.id] = (tasks[c.id] || []).map(t => ({ id: t.id, completed: t.completed, photo: t.photo, photoTime: t.photoTime }));
-    });
-    localStorage.setItem('hallel_tasks_progress', JSON.stringify({ date: today, state }));
+    localStorage.setItem('hallel_tasks_progress', JSON.stringify({ date: getLocalDateKey(), tasks }));
   }, [tasks]);
 
   const activeChild = CHILDREN.find((c) => c.id === activeChildId)!;
@@ -803,7 +846,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   type JournalFilter = 'day' | 'week' | 'month';
   const [journalFilter, setJournalFilter] = useState<JournalFilter>('week');
   const [journalChildFilter, setJournalChildFilter] = useState<string>('all');
-  const [journalDate, setJournalDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [journalDate, setJournalDate] = useState<string>(getLocalDateKey());
 
   // If Shabbat - show Shabbat screen
   if (shabbatStatus.isShabbat) {
@@ -1780,7 +1823,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                               className="px-2 py-1 text-[10px] border border-[#D6CFC4] rounded-lg bg-white"
                             />
                             <button
-                              onClick={() => setJournalDate(new Date().toISOString().split('T')[0])}
+                              onClick={() => setJournalDate(getLocalDateKey())}
                               className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700"
                             >היום</button>
                           </div>
@@ -1842,7 +1885,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                                 const dayDate = new Date(day.date);
                                 const hebrewDay = getHebrewDayMonth(dayDate);
                                 const dayNames = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
-                                const isToday = day.date === new Date().toISOString().split('T')[0];
+                                const isToday = day.date === getLocalDateKey();
                                 
                                 return (
                                   <div key={idx} className={`p-3 rounded-xl border ${isToday ? 'border-[#8A9A5B] bg-green-50/30' : 'border-[#E3DCD2] bg-[#FAF8F5]'}`}>
@@ -2015,7 +2058,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                             const totalCompleted = dayChildren.reduce((acc, c) => acc + c.completed, 0);
                             const totalAll = dayChildren.reduce((acc, c) => acc + c.total, 0);
                             const pct = totalAll > 0 ? Math.round((totalCompleted / totalAll) * 100) : 0;
-                            const isToday = day.date === new Date().toISOString().split('T')[0];
+                            const isToday = day.date === getLocalDateKey();
                             
                             let bgColor = 'bg-red-100 border-red-200';
                             let emoji = '😟';
@@ -2346,7 +2389,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                         </div>
                         <button
                           onClick={() => {
-                            const today = new Date().toISOString().split('T')[0];
+                            const today = getLocalDateKey();
                             localStorage.removeItem(`hallel_daily_duties_${today}`);
                             const newAssignments = getDailyDutyAssignments();
                             setDailyDutyAssignments(newAssignments);
@@ -2798,6 +2841,66 @@ function syncMashovToAppSheet() {
                   </div>
                   </div>
                   </div>)}
+
+                  {/* Find the Tablet */}
+                  <div style={{ order: panelOrder.indexOf('findDevice') }}
+                    draggable onDragStart={() => handlePanelDragStart('findDevice')} onDragOver={(e) => handlePanelDragOver(e, 'findDevice')} onDrop={() => handlePanelDrop('findDevice')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'findDevice' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'findDevice' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
+                  <div className="bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm space-y-4">
+                    <div className="flex items-center gap-2">
+                      <div className="cursor-grab active:cursor-grabbing text-[#D6CFC4] hover:text-[#8C8479] select-none" title="גרור">⠿</div>
+                      <div className="flex-1 flex items-center justify-between border-b border-[#F2EDE4] pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">📍</span>
+                          <h4 className="font-bold text-[#5D4037] text-lg">איתור הטאבלט</h4>
+                        </div>
+                        <span className={`text-[11px] rounded-full px-2.5 py-1 font-bold flex items-center gap-1 ${
+                          isFindDeviceSoundPlaying ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                        }`}>
+                          {isFindDeviceSoundPlaying ? '🔴 הצליל מתנגן' : '🟢 הצליל כבוי'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-[#8C8479] leading-relaxed">
+                      אם הטאבלט הלך לאיבוד בבית, ניתן להשמיע צליל חזק כדי למצוא אותו.
+                    </p>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={playFindDeviceSound}
+                        disabled={isFindDeviceSoundPlaying}
+                        className="flex-1 px-4 py-2.5 bg-[#8A9A5B] hover:bg-[#6A7B42] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <span>🔊</span>
+                        <span>השמע צליל</span>
+                      </button>
+                      <button
+                        onClick={stopFindDeviceSound}
+                        disabled={!isFindDeviceSoundPlaying}
+                        className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <span>⏹️</span>
+                        <span>עצור צליל</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] text-[#8C8479] font-bold">
+                        <span>עוצמת קול</span>
+                        <span>{Math.round(findDeviceVolume * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={Math.round(findDeviceVolume * 100)}
+                        onChange={(e) => setFindDeviceVolume(Number(e.target.value) / 100)}
+                        className="w-full accent-[#8A9A5B]"
+                      />
+                    </div>
+                  </div>
+                  </div>
 
                 </div>
               )}
