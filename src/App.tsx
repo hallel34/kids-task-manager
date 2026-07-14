@@ -353,6 +353,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     isFlashOn: isFindDeviceFlashOn,
     ringTablet,
     stopRinging,
+    retryPlayback: retryFindDevicePlayback,
     volume: findDeviceVolume,
     setVolume: setFindDeviceVolume,
     sendError: findDeviceSendError,
@@ -895,9 +896,29 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#4A4540] font-sans selection:bg-[#E3DCD2] flex flex-col md:flex-row-reverse" dir="rtl">
 
-      {/* Find-the-tablet flash overlay - toggles every 500ms while ringing, on top of whatever screen is currently showing */}
-      {isFindDeviceFlashOn && (
-        <div className="fixed inset-0 z-[9999] bg-red-600/80 pointer-events-none" />
+      {/* Find-the-tablet overlay - background flashes every 500ms while ringing, on top of whatever screen is currently showing.
+          Every device that's part of the sync group rings, including the one that pressed the button, so this needs its own
+          Stop control rather than just blocking clicks to whatever's underneath. */}
+      {isFindDeviceRinging && (
+        <div className={`fixed inset-0 z-[9999] flex items-center justify-center transition-colors duration-200 ${isFindDeviceFlashOn ? 'bg-red-600/80' : 'bg-red-900/50'}`}>
+          <div className="bg-white/95 rounded-2xl px-6 py-5 text-center shadow-2xl max-w-xs mx-4 space-y-3">
+            <span className="text-4xl block">📍🔊</span>
+            <p className="text-lg font-bold text-red-700">מחפשים את המכשיר הזה!</p>
+            <button
+              onClick={retryFindDevicePlayback}
+              className="w-full px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl text-xs font-bold transition-all"
+            >
+              🔊 אין קול? הקישו כאן
+            </button>
+            <button
+              onClick={stopRinging}
+              className="w-full px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5"
+            >
+              <span>⏹️</span>
+              <span>עצור צליל</span>
+            </button>
+          </div>
+        </div>
       )}
 
       {/* SIDEBAR - Collapsible */}

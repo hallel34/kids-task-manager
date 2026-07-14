@@ -18,6 +18,7 @@ interface UseFindDevice {
   isFlashOn: boolean; // toggles every 500ms while ringing - for a full-screen flash overlay
   ringTablet: () => Promise<void>;
   stopRinging: () => Promise<void>;
+  retryPlayback: () => void; // manual "tap here if you don't hear anything" escape hatch
   volume: number;
   setVolume: (v: number) => void;
   sendError: string | null;
@@ -74,6 +75,23 @@ export function useFindDevice(familyCode: string, syncEnabled: boolean): UseFind
     }
   }, []);
 
+  // Arm audio playback on the very first tap/click/keypress anywhere in the
+  // app. Mobile browsers (iOS Safari especially) block programmatic audio
+  // unless it was started during a real user gesture - a remote trigger
+  // arrives via an async Firestore callback, which does NOT count as one,
+  // and fails completely silently (no error, just no sound). Almost any
+  // interaction with a tablet used daily by kids satisfies this well
+  // before a "find my device" trigger would ever be needed.
+  useEffect(() => {
+    const handleFirstInteraction = () => sound.unlock();
+    document.addEventListener('pointerdown', handleFirstInteraction, { once: true, capture: true });
+    document.addEventListener('keydown', handleFirstInteraction, { once: true, capture: true });
+    return () => {
+      document.removeEventListener('pointerdown', handleFirstInteraction, { capture: true });
+      document.removeEventListener('keydown', handleFirstInteraction, { capture: true });
+    };
+  }, [sound.unlock]);
+
   // Real-time subscription to the shared command - active for as long as
   // sync is on, independent of parent/child view.
   useEffect(() => {
@@ -126,5 +144,14 @@ export function useFindDevice(familyCode: string, syncEnabled: boolean): UseFind
     }
   }, [familyCode]);
 
-  return { isRinging, isFlashOn, ringTablet, stopRinging, volume: sound.volume, setVolume: sound.setVolume, sendError };
+  return {
+    isRinging,
+    isFlashOn,
+    ringTablet,
+    stopRinging,
+    retryPlayback: sound.forcePlay,
+    volume: sound.volume,
+    setVolume: sound.setVolume,
+    sendError,
+  };
 }
