@@ -20,6 +20,7 @@ import {
   getDailyDutyAssignments,
   reshuffleDailyDutyAssignments,
   previewDutyAssignments,
+  getSharedDutyTasksFor,
   getTasksForToday,
   getEarnedScreenTime,
   buildTasksForDayType,
@@ -2426,10 +2427,23 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                           onClick={() => {
                             const newAssignments = reshuffleDailyDutyAssignments();
                             setDailyDutyAssignments(newAssignments);
-                            // Rebuild tasks with new assignments
-                            const t: Record<string, Task[]> = {};
-                            CHILDREN.forEach(c => { t[c.id] = getTasksForToday(c.id); });
-                            setTasks(t);
+                            // Swap out only the duty-rotation tasks (SHARED_DUTIES or
+                            // FRIDAY_DUTIES ids) for the new assignment - every other
+                            // task (hygiene, homework, custom, already-completed ones)
+                            // must stay exactly as it was. Rebuilding via
+                            // getTasksForToday() here would wipe the whole day's
+                            // progress for every child, not just re-roll the chore.
+                            const dutyPool = isFriday ? FRIDAY_DUTIES : SHARED_DUTIES;
+                            const dutyIds = new Set(dutyPool.map(d => d.id));
+                            setTasks(prev => {
+                              const next: Record<string, Task[]> = {};
+                              CHILDREN.forEach(c => {
+                                const keep = (prev[c.id] || []).filter(t => !dutyIds.has(t.id));
+                                const newDuty = getSharedDutyTasksFor(c.id, newAssignments, dutyPool);
+                                next[c.id] = [...keep, ...newDuty];
+                              });
+                              return next;
+                            });
                           }}
                           className="px-3 py-1.5 bg-[#8A9A5B] hover:bg-[#6A7B42] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
                           title="הגרל מחדש משימות היום"
