@@ -9,8 +9,10 @@ function fsUrl(path: string) {
   return `${FS_BASE}/${path}?key=${FIREBASE_API_KEY}`;
 }
 
-// Save tasks state to Firestore
-export async function saveTasksToCloud(familyCode: string, date: string, tasks: Record<string, any[]>) {
+// Save tasks state to Firestore. Returns the updatedAt stamp it wrote, so
+// the caller can remember exactly which version is now in the cloud
+// (see loadTasksFromCloud + useCloudSync's staleness check).
+export async function saveTasksToCloud(familyCode: string, date: string, tasks: Record<string, any[]>, updatedAt: number = Date.now()): Promise<number> {
   const url = fsUrl(`families/${familyCode}/dailyTasks/${date}`);
   const resp = await fetch(url, {
     method: 'PATCH',
@@ -18,7 +20,7 @@ export async function saveTasksToCloud(familyCode: string, date: string, tasks: 
     body: JSON.stringify({
       fields: {
         tasks: { stringValue: JSON.stringify(tasks) },
-        updatedAt: { integerValue: String(Date.now()) },
+        updatedAt: { integerValue: String(updatedAt) },
       }
     })
   });
@@ -26,10 +28,14 @@ export async function saveTasksToCloud(familyCode: string, date: string, tasks: 
     const err = await resp.text();
     throw new Error(`Firestore save failed ${resp.status}: ${err.slice(0, 100)}`);
   }
+  return updatedAt;
 }
 
-// Load tasks state from Firestore
-export async function loadTasksFromCloud(familyCode: string, date: string): Promise<Record<string, any[]> | null> {
+// Load tasks state from Firestore, along with the updatedAt stamp it was
+// saved with - callers must compare this against the last version they
+// know about before applying it, otherwise a poll that lands while a local
+// change is still mid-save can fetch stale data and clobber that change.
+export async function loadTasksFromCloud(familyCode: string, date: string): Promise<{ tasks: Record<string, any[]>; updatedAt: number } | null> {
   const url = fsUrl(`families/${familyCode}/dailyTasks/${date}`);
   const resp = await fetch(url);
   if (resp.status === 404) return null;
@@ -37,7 +43,8 @@ export async function loadTasksFromCloud(familyCode: string, date: string): Prom
   const data = await resp.json();
   const raw = data?.fields?.tasks?.stringValue;
   if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
+  const updatedAt = Number(data?.fields?.updatedAt?.integerValue || 0);
+  try { return { tasks: JSON.parse(raw), updatedAt }; } catch { return null; }
 }
 
 // Save smileys to Firestore

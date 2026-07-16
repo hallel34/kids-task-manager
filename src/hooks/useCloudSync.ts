@@ -28,7 +28,11 @@ export function useCloudSync(tasks: Record<string, Task[]>, setTasks: Dispatch<S
   const [syncEnabled, setSyncEnabledState] = useState<boolean>(() => localStorage.getItem('hallel_sync_enabled') === 'true');
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const cloudSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastLocalSave = useRef<number>(0);
+  // The updatedAt stamp of the newest version of "tasks" we know is either
+  // already in the cloud or about to be written there. A poll result is
+  // only ever applied if its updatedAt is strictly greater than this - see
+  // the poll effect below for why a time-based guard isn't enough.
+  const knownUpdatedAt = useRef<number>(0);
 
   const setFamilyCode = (code: string) => {
     localStorage.setItem('hallel_family_code', code);
@@ -48,8 +52,8 @@ export function useCloudSync(tasks: Record<string, Task[]>, setTasks: Dispatch<S
     cloudSaveTimer.current = setTimeout(async () => {
       try {
         setSyncStatus('syncing');
-        await saveTasksToCloud(familyCode, getLocalDateKey(), tasks);
-        lastLocalSave.current = Date.now();
+        const writtenAt = await saveTasksToCloud(familyCode, getLocalDateKey(), tasks);
+        knownUpdatedAt.current = writtenAt;
         setSyncStatus('ok');
         setTimeout(() => setSyncStatus('idle'), 3000);
       } catch {
@@ -58,16 +62,23 @@ export function useCloudSync(tasks: Record<string, Task[]>, setTasks: Dispatch<S
     }, 1500);
   }, [tasks, syncEnabled, familyCode]);
 
-  // Poll Firestore every 30 seconds to receive updates from other devices
+  // Poll Firestore every 30 seconds to receive updates from other devices.
+  // Only ever applies a fetched snapshot if its updatedAt is strictly newer
+  // than the last version we know about (our own last save, or the last
+  // poll result we applied). Without this, a poll landing in the ~1.5s
+  // window between a child checking a task and the debounced save above
+  // actually completing would fetch the still-stale cloud copy and stomp
+  // the fresh local checkmark right back to unchecked - and then the
+  // debounce effect would re-fire on that reverted state and helpfully
+  // save the wrong thing back to the cloud, permanently.
   useEffect(() => {
     if (!syncEnabled || !familyCode) return;
     const poll = async () => {
-      // Skip if we just saved locally (avoid overwriting our own data)
-      if (Date.now() - lastLocalSave.current < 5000) return;
       try {
-        const cloudTasks = await loadTasksFromCloud(familyCode, getLocalDateKey());
-        if (cloudTasks) {
-          setTasks(cloudTasks as Record<string, Task[]>);
+        const result = await loadTasksFromCloud(familyCode, getLocalDateKey());
+        if (result && result.updatedAt > knownUpdatedAt.current) {
+          knownUpdatedAt.current = result.updatedAt;
+          setTasks(result.tasks as Record<string, Task[]>);
           setSyncStatus('ok');
           setTimeout(() => setSyncStatus('idle'), 2000);
         }
