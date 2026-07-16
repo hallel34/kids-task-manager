@@ -11,6 +11,7 @@ import {
   SCREEN_TIME_REWARD,
   PRIZE_STORE,
   SHARED_DUTIES,
+  FRIDAY_DUTIES,
   STREAK_BONUS_PER_DAY,
   STREAK_WEEKLY_BONUS,
   WEEKLY_EXCELLENCE_THRESHOLD,
@@ -18,6 +19,7 @@ import {
   getSchoolEndTime,
   getDailyDutyAssignments,
   reshuffleDailyDutyAssignments,
+  previewDutyAssignments,
   getTasksForToday,
   getEarnedScreenTime,
   buildTasksForDayType,
@@ -173,7 +175,9 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   const getTasksForDayOfWeek = (childId: string, day: EditDay): Task[] => {
     if (day === 'today') return tasks[childId] || [];
     const dayNum = parseInt(day);
-    return buildTasksForDayType(childId, dayNum === 5, dailyDutyAssignments, customDayTasks);
+    const isFridayPreview = dayNum === 5;
+    const assignments = previewDutyAssignments(isFridayPreview);
+    return buildTasksForDayType(childId, isFridayPreview, assignments, customDayTasks);
   };
 
   // Add task to a specific day template
@@ -308,8 +312,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   // the two can never disagree about what a given day's tasks are.
   const buildFreshTasksForToday = (): Record<string, Task[]> => {
     const isFridayToday = new Date().getDay() === 5;
-    // Friday never uses shared-duty rotation, so skip the lookup on Fridays.
-    const dutyAssignments = isFridayToday ? {} : getDailyDutyAssignments();
+    const dutyAssignments = getDailyDutyAssignments();
     const base: Record<string, Task[]> = {};
     CHILDREN.forEach(c => {
       base[c.id] = buildTasksForDayType(c.id, isFridayToday, dutyAssignments, customDayTasks);
@@ -2417,7 +2420,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                       <div className="flex items-center justify-between border-b border-[#F2EDE4] pb-3">
                         <div className="flex items-center gap-2">
                           <span className="text-xl">🎲</span>
-                          <h4 className="font-bold text-[#5D4037] text-lg">גלגול משימות בית יומי</h4>
+                          <h4 className="font-bold text-[#5D4037] text-lg">{isFriday ? 'גלגול משימות שישי' : 'גלגול משימות בית יומי'}</h4>
                         </div>
                         <button
                           onClick={() => {
@@ -2435,9 +2438,13 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                           <span>הגרל מחדש</span>
                         </button>
                       </div>
-                      <p className="text-xs text-[#8C8479]">כל יום נבחר באקראי ילד שיבצע כל משימת בית כללית. הגרלה חדשה מתרחשת אוטומטית בחצות.</p>
+                      <p className="text-xs text-[#8C8479]">
+                        {isFriday
+                          ? 'כל שישי נבחר באקראי ילד שיבצע כל משימת הכנה לשבת. הגרלה חדשה מתרחשת אוטומטית כל שבוע.'
+                          : 'כל יום נבחר באקראי ילד שיבצע כל משימת בית כללית. הגרלה חדשה מתרחשת אוטומטית בחצות.'}
+                      </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {SHARED_DUTIES.map(duty => {
+                        {(isFriday ? FRIDAY_DUTIES : SHARED_DUTIES).map(duty => {
                           const assignedId = dailyDutyAssignments[duty.id];
                           const assignedChild = CHILDREN.find(c => c.id === assignedId);
                           if (!assignedChild) return null;

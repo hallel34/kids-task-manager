@@ -84,6 +84,7 @@ interface SharedDuty {
   time: TimeOfDay;
   mandatory: boolean;
   minAge: number; // minimum child age to be eligible
+  requiresPhoto?: boolean;
 }
 
 export const SHARED_DUTIES: SharedDuty[] = [
@@ -96,6 +97,19 @@ export const SHARED_DUTIES: SharedDuty[] = [
   { id: 'sd_siblings',   title: 'עזרה באחים הקטנים',           emoji: '👶', time: 'afternoon', mandatory: false, minAge: 7  },
 ];
 
+// Friday (Erev Shabbat) chores - same rotation mechanism as SHARED_DUTIES,
+// but a separate pool: each duty goes to exactly one eligible child per
+// Friday instead of every child doing all of them.
+export const FRIDAY_DUTIES: SharedDuty[] = [
+  { id: 'f1', title: 'סידור החדר וניקיון',    emoji: '🧹', time: 'afternoon', mandatory: true, minAge: 6, requiresPhoto: true },
+  { id: 'f2', title: 'קיפול והכנסת כביסה',    emoji: '🧺', time: 'afternoon', mandatory: true, minAge: 6  },
+  { id: 'f3', title: 'ניקיון הבית לשבת',      emoji: '🏠', time: 'afternoon', mandatory: true, minAge: 6  },
+  { id: 'f4', title: 'עריכת שולחן שבת',       emoji: '🕯️', time: 'afternoon', mandatory: true, minAge: 6  },
+  { id: 'f5', title: 'סידור נרות שבת',        emoji: '🕎', time: 'afternoon', mandatory: true, minAge: 6  },
+  { id: 'f6', title: 'השקיית הגינה',          emoji: '🌱', time: 'afternoon', mandatory: true, minAge: 10 },
+  { id: 'f7', title: 'עזרה בהכנות לשבת',      emoji: '🍲', time: 'afternoon', mandatory: true, minAge: 10 },
+];
+
 // Deterministic LCG seeded by date string → same result all day, different every day
 function _seededRand(seed: number) {
   let s = seed;
@@ -105,9 +119,9 @@ function _seededRand(seed: number) {
   };
 }
 
-function _rollDutyAssignments(rand: () => number): Record<string, string> {
+function _rollDutyAssignments(rand: () => number, duties: SharedDuty[]): Record<string, string> {
   const assignments: Record<string, string> = {};
-  SHARED_DUTIES.forEach(duty => {
+  duties.forEach(duty => {
     const eligible = CHILDREN.filter(c => c.age >= duty.minAge);
     if (eligible.length > 0) {
       assignments[duty.id] = eligible[Math.floor(rand() * eligible.length)].id;
@@ -116,14 +130,20 @@ function _rollDutyAssignments(rand: () => number): Record<string, string> {
   return assignments;
 }
 
+function _isDateFriday(dateKey: string): boolean {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay() === 5;
+}
+
 export function getDailyDutyAssignments(): Record<string, string> {
   const today = getLocalDateKey();
   const key = `hallel_daily_duties_${today}`;
   const saved = localStorage.getItem(key);
   if (saved) { try { return JSON.parse(saved); } catch {} }
 
+  const duties = _isDateFriday(today) ? FRIDAY_DUTIES : SHARED_DUTIES;
   const seed = today.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const assignments = _rollDutyAssignments(_seededRand(seed));
+  const assignments = _rollDutyAssignments(_seededRand(seed), duties);
   localStorage.setItem(key, JSON.stringify(assignments));
   return assignments;
 }
@@ -136,9 +156,23 @@ export function getDailyDutyAssignments(): Record<string, string> {
 export function reshuffleDailyDutyAssignments(): Record<string, string> {
   const today = getLocalDateKey();
   const key = `hallel_daily_duties_${today}`;
-  const assignments = _rollDutyAssignments(Math.random);
+  const duties = _isDateFriday(today) ? FRIDAY_DUTIES : SHARED_DUTIES;
+  const assignments = _rollDutyAssignments(Math.random, duties);
   localStorage.setItem(key, JSON.stringify(assignments));
   return assignments;
+}
+
+// Preview a duty rotation for a day-type that may not be today (e.g. a
+// parent editing Friday's template on a Tuesday). If the requested type
+// matches today, this is just today's real (cached) assignment; otherwise
+// it's a deterministic-but-uncached roll, since it isn't actually "today"'s
+// assignment and shouldn't be persisted as such.
+export function previewDutyAssignments(isFriday: boolean): Record<string, string> {
+  const today = getLocalDateKey();
+  if (isFriday === _isDateFriday(today)) return getDailyDutyAssignments();
+  const duties = isFriday ? FRIDAY_DUTIES : SHARED_DUTIES;
+  const seed = today.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  return _rollDutyAssignments(_seededRand(seed), duties);
 }
 
 // ========== PERSONAL TASK TEMPLATES (per-child hygiene, homework, own room) ==========
@@ -238,26 +272,19 @@ export function getInitialTasksForChild(childId: string): Task[] {
   ];
 }
 
-// Friday (Erev Shabbat) special tasks
+// Friday (Erev Shabbat) special tasks. The Friday chore itself (room
+// cleaning, table setting, etc.) is NOT included here - it comes from the
+// FRIDAY_DUTIES rotation via buildTasksForDayType(), same as weekday shared
+// duties, so each eligible child gets one assigned chore instead of all of
+// them getting the full list.
 export function getFridayTasksForChild(childId: string): Task[] {
   const child = CHILDREN.find(c => c.id === childId);
   const age = child?.age || 7;
-  const isOlder = age >= 10;
 
   const morningTasks = getInitialTasksForChild(childId).filter(t => t.time === 'morning');
 
-  const fridayAfternoon: Task[] = [
-    { id: 'f1', time: 'afternoon', title: 'סידור החדר וניקיון', emoji: '🧹', completed: false, mandatory: true, requiresPhoto: true },
-    { id: 'f2', time: 'afternoon', title: 'קיפול והכנסת כביסה', emoji: '🧺', completed: false, mandatory: true },
-    { id: 'f3', time: 'afternoon', title: 'ניקיון הבית לשבת', emoji: '🏠', completed: false, mandatory: age >= 7 },
-    { id: 'f4', time: 'afternoon', title: 'עריכת שולחן שבת', emoji: '🕯️', completed: false, mandatory: true },
-    { id: 'f5', time: 'afternoon', title: 'סידור נרות שבת', emoji: '🕎', completed: false, mandatory: age >= 6 },
-    { id: 'f6', time: 'afternoon', title: 'השקיית הגינה', emoji: '🌱', completed: false, mandatory: isOlder },
-    { id: 'f7', time: 'afternoon', title: 'עזרה בהכנות לשבת', emoji: '🍲', completed: false, mandatory: isOlder },
-  ];
-
   if (age <= 5) {
-    // Simpler tasks for youngest
+    // Too young for the rotation (FRIDAY_DUTIES minAge is 6) - simpler fixed tasks.
     return [
       ...morningTasks,
       { id: 'f1', time: 'afternoon', title: 'סידור הצעצועים', emoji: '🧸', completed: false, mandatory: true, requiresPhoto: true },
@@ -273,12 +300,13 @@ export function getFridayTasksForChild(childId: string): Task[] {
     { id: 'fe2', time: 'evening', title: 'לבישת בגדי שבת', emoji: '👔', completed: false, mandatory: true },
   ];
 
-  return [...morningTasks, ...fridayAfternoon, ...fridayEvening];
+  return [...morningTasks, ...fridayEvening];
 }
 
-// Build the assigned shared-duty tasks for a child given an assignments map
-export function getSharedDutyTasksFor(childId: string, assignments: Record<string, string>): Task[] {
-  return SHARED_DUTIES
+// Build the assigned duty tasks for a child given an assignments map and a
+// duty pool (SHARED_DUTIES for weekdays, FRIDAY_DUTIES for Friday).
+export function getSharedDutyTasksFor(childId: string, assignments: Record<string, string>, duties: SharedDuty[] = SHARED_DUTIES): Task[] {
+  return duties
     .filter(d => assignments[d.id] === childId)
     .map(d => ({
       id: d.id,
@@ -287,15 +315,16 @@ export function getSharedDutyTasksFor(childId: string, assignments: Record<strin
       emoji: d.emoji,
       completed: false,
       mandatory: d.mandatory,
+      ...(d.requiresPhoto ? { requiresPhoto: true } : {}),
     }));
 }
 
 // Single canonical builder for one child's task list on a given day-type
-// (Friday vs. a regular weekday): template + shared-duty rotation (regular
-// days only) + any day-template custom tasks. Every place that builds a
-// day's task list - "today", the day-of-week editor preview, and the
-// nightly regeneration in App.tsx - goes through this so they can't drift
-// apart from one another.
+// (Friday vs. a regular weekday): template + duty rotation (SHARED_DUTIES
+// on weekdays, FRIDAY_DUTIES on Friday) + any day-template custom tasks.
+// Every place that builds a day's task list - "today", the day-of-week
+// editor preview, and the nightly regeneration in App.tsx - goes through
+// this so they can't drift apart from one another.
 export function buildTasksForDayType(
   childId: string,
   isFriday: boolean,
@@ -303,7 +332,7 @@ export function buildTasksForDayType(
   customDayTasks: Record<string, Task[]>
 ): Task[] {
   const base = isFriday ? getFridayTasksForChild(childId) : getInitialTasksForChild(childId);
-  const shared = isFriday ? [] : getSharedDutyTasksFor(childId, dutyAssignments);
+  const shared = getSharedDutyTasksFor(childId, dutyAssignments, isFriday ? FRIDAY_DUTIES : SHARED_DUTIES);
   const customKey = `${childId}_${isFriday ? 'friday' : 'regular'}`;
   const custom = customDayTasks[customKey] || [];
   return [...base, ...shared, ...custom];
@@ -312,9 +341,7 @@ export function buildTasksForDayType(
 // Get tasks based on day of week
 export function getTasksForToday(childId: string): Task[] {
   const isFriday = new Date().getDay() === 5;
-  // Friday tasks never use shared-duty rotation, so skip the (cached but
-  // still not-free) lookup entirely on Fridays, same as before.
-  const assignments = isFriday ? {} : getDailyDutyAssignments();
+  const assignments = getDailyDutyAssignments();
   return buildTasksForDayType(childId, isFriday, assignments, {});
 }
 
