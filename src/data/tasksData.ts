@@ -105,6 +105,17 @@ function _seededRand(seed: number) {
   };
 }
 
+function _rollDutyAssignments(rand: () => number): Record<string, string> {
+  const assignments: Record<string, string> = {};
+  SHARED_DUTIES.forEach(duty => {
+    const eligible = CHILDREN.filter(c => c.age >= duty.minAge);
+    if (eligible.length > 0) {
+      assignments[duty.id] = eligible[Math.floor(rand() * eligible.length)].id;
+    }
+  });
+  return assignments;
+}
+
 export function getDailyDutyAssignments(): Record<string, string> {
   const today = getLocalDateKey();
   const key = `hallel_daily_duties_${today}`;
@@ -112,16 +123,20 @@ export function getDailyDutyAssignments(): Record<string, string> {
   if (saved) { try { return JSON.parse(saved); } catch {} }
 
   const seed = today.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const rand = _seededRand(seed);
-  const assignments: Record<string, string> = {};
+  const assignments = _rollDutyAssignments(_seededRand(seed));
+  localStorage.setItem(key, JSON.stringify(assignments));
+  return assignments;
+}
 
-  SHARED_DUTIES.forEach(duty => {
-    const eligible = CHILDREN.filter(c => c.age >= duty.minAge);
-    if (eligible.length > 0) {
-      assignments[duty.id] = eligible[Math.floor(rand() * eligible.length)].id;
-    }
-  });
-
+// Manually re-roll today's duty assignments (the "הגרל מחדש" button). Unlike
+// getDailyDutyAssignments(), the seed here is NOT derived from the date -
+// that would make every reroll land on the same result, since the date
+// hasn't changed. Uses Math.random() instead so each click actually
+// produces a different assignment, then overwrites today's cached value.
+export function reshuffleDailyDutyAssignments(): Record<string, string> {
+  const today = getLocalDateKey();
+  const key = `hallel_daily_duties_${today}`;
+  const assignments = _rollDutyAssignments(Math.random);
   localStorage.setItem(key, JSON.stringify(assignments));
   return assignments;
 }

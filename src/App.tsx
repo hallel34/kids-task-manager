@@ -17,6 +17,7 @@ import {
   WEEKLY_EXCELLENCE_BONUS,
   getSchoolEndTime,
   getDailyDutyAssignments,
+  reshuffleDailyDutyAssignments,
   getTasksForToday,
   getEarnedScreenTime,
   buildTasksForDayType,
@@ -2420,9 +2421,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                         </div>
                         <button
                           onClick={() => {
-                            const today = getLocalDateKey();
-                            localStorage.removeItem(`hallel_daily_duties_${today}`);
-                            const newAssignments = getDailyDutyAssignments();
+                            const newAssignments = reshuffleDailyDutyAssignments();
                             setDailyDutyAssignments(newAssignments);
                             // Rebuild tasks with new assignments
                             const t: Record<string, Task[]> = {};
