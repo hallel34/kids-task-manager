@@ -47,32 +47,52 @@ export async function loadTasksFromCloud(familyCode: string, date: string): Prom
   try { return { tasks: JSON.parse(raw), updatedAt }; } catch { return null; }
 }
 
-// Save smileys to Firestore
-export async function saveSmileysToCloud(familyCode: string, smileys: Record<string, number>, gifts: Record<string, number>) {
+// Save smileys/gifts/celebration-shown-today to Firestore. Returns the
+// updatedAt stamp it wrote (see saveTasksToCloud - same versioning pattern,
+// needed so a poll can't clobber a fresh local award with a stale copy).
+export async function saveRewardsToCloud(
+  familyCode: string,
+  smileys: Record<string, number>,
+  gifts: Record<string, number>,
+  celebrationShown: Record<string, string>,
+  updatedAt: number = Date.now()
+): Promise<number> {
   const url = fsUrl(`families/${familyCode}/rewards/current`);
-  await fetch(url, {
+  const resp = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       fields: {
         smileys: { stringValue: JSON.stringify(smileys) },
         gifts: { stringValue: JSON.stringify(gifts) },
-        updatedAt: { integerValue: String(Date.now()) },
+        celebrationShown: { stringValue: JSON.stringify(celebrationShown) },
+        updatedAt: { integerValue: String(updatedAt) },
       }
     })
   });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Firestore rewards save failed ${resp.status}: ${err.slice(0, 100)}`);
+  }
+  return updatedAt;
 }
 
-// Load smileys from Firestore
-export async function loadSmileysFromCloud(familyCode: string): Promise<{ smileys: Record<string, number>; gifts: Record<string, number> } | null> {
+// Load smileys/gifts/celebration-shown-today from Firestore, with the
+// updatedAt stamp - callers must compare before applying, same reason as
+// loadTasksFromCloud.
+export async function loadRewardsFromCloud(familyCode: string): Promise<{ smileys: Record<string, number>; gifts: Record<string, number>; celebrationShown: Record<string, string>; updatedAt: number } | null> {
   const url = fsUrl(`families/${familyCode}/rewards/current`);
   const resp = await fetch(url);
+  if (resp.status === 404) return null;
   if (!resp.ok) return null;
   const data = await resp.json();
+  const updatedAt = Number(data?.fields?.updatedAt?.integerValue || 0);
   try {
     return {
       smileys: JSON.parse(data?.fields?.smileys?.stringValue || '{}'),
       gifts: JSON.parse(data?.fields?.gifts?.stringValue || '{}'),
+      celebrationShown: JSON.parse(data?.fields?.celebrationShown?.stringValue || '{}'),
+      updatedAt,
     };
   } catch { return null; }
 }

@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { useCloudSync } from './hooks/useCloudSync';
+import { useRewardsSync } from './hooks/useRewardsSync';
 import { useFindDevice } from './hooks/useFindDevice';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
 import { getLocalDateKey } from './utils/date';
@@ -349,6 +350,12 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   });
 
   const { familyCode, setFamilyCode, syncEnabled, setSyncEnabled, syncStatus } = useCloudSync(tasks, setTasks);
+
+  // Smileys/gifts/celebration-shown-today didn't cross devices before this -
+  // a smiley earned on the kids' tablet never showed up on a parent's phone,
+  // and a device that didn't see today's celebration yet could show the
+  // "כל הכבוד" popup again for something another device already celebrated.
+  useRewardsSync(familyCode, syncEnabled, smileyCount, setSmileyCount, giftsRedeemed, setGiftsRedeemed, celebrationShown, setCelebrationShown);
 
   // Subscribes in real time regardless of parent/child view - the device
   // must ring the moment a family member remotely triggers it, no matter

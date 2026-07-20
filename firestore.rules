@@ -26,11 +26,13 @@ service cloud.firestore {
 
     match /families/{familyId}/rewards/current {
       allow get: if true;
-      allow create, update: if request.resource.data.keys().hasOnly(['smileys', 'gifts', 'updatedAt'])
+      allow create, update: if request.resource.data.keys().hasOnly(['smileys', 'gifts', 'celebrationShown', 'updatedAt'])
         && request.resource.data.smileys is string
         && request.resource.data.smileys.size() < 50000
         && request.resource.data.gifts is string
         && request.resource.data.gifts.size() < 50000
+        && request.resource.data.celebrationShown is string
+        && request.resource.data.celebrationShown.size() < 50000
         && request.resource.data.updatedAt is int;
       allow delete: if false;
     }
