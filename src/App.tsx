@@ -131,8 +131,8 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     CHILDREN.forEach(c => { t[c.id] = 0; });
     return t;
   });
-  const [redeemedPrizes, setRedeemedPrizes] = useLocalStorage<Record<string, { prizeId: string; date: string }[]>>('hallel_redeemed_prizes', () => {
-    const t: Record<string, { prizeId: string; date: string }[]> = {};
+  const [redeemedPrizes, setRedeemedPrizes] = useLocalStorage<Record<string, { id: string; prizeId: string; date: string }[]>>('hallel_redeemed_prizes', () => {
+    const t: Record<string, { id: string; prizeId: string; date: string }[]> = {};
     CHILDREN.forEach(c => { t[c.id] = []; });
     return t;
   });
@@ -244,7 +244,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   const togglePanel = (id: string) => setCollapsedPanels(prev => ({ ...prev, [id]: !prev[id] }));
 
   // --- DASHBOARD PANEL DRAG & DROP ORDER ---
-  const DEFAULT_PANEL_ORDER = ['tracker', 'photos', 'smileys', 'editor', 'mashov', 'technical', 'findDevice'];
+  const DEFAULT_PANEL_ORDER = ['tracker', 'photos', 'smileys', 'prizeRedemptions', 'editor', 'mashov', 'technical', 'findDevice'];
   const [panelOrder, setPanelOrder] = useLocalStorage<string[]>('hallel_panel_order', () => {
     const saved = localStorage.getItem('hallel_panel_order');
     if (saved) {
@@ -638,8 +638,28 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
       setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) - prize.cost }));
       setRedeemedPrizes(prev => ({
         ...prev,
-        [childId]: [...(prev[childId] || []), { prizeId: prize.id, date: new Date().toISOString() }]
+        [childId]: [...(prev[childId] || []), { id: `redeem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, prizeId: prize.id, date: new Date().toISOString() }]
       }));
+    }
+  };
+
+  // Cancel a purchase from the prize store (parent-only, see the "ביטול
+  // רכישות" panel) - refunds the points it cost and removes the record.
+  // Older redemptions saved before the `id` field existed have no id to
+  // match on, so fall back to matching by array position instead (an
+  // `id` match must never fall back to position - two undefined ids would
+  // otherwise both "match" the first such record found).
+  const cancelPrizeRedemption = (childId: string, redemptionId: string | undefined, fallbackIndex: number) => {
+    const list = redeemedPrizes[childId] || [];
+    const record = redemptionId ? list.find((r) => r.id === redemptionId) : list[fallbackIndex];
+    if (!record) return;
+    const prize = PRIZE_STORE.find((p) => p.id === record.prizeId);
+    setRedeemedPrizes(prev => ({
+      ...prev,
+      [childId]: (prev[childId] || []).filter((r) => r !== record),
+    }));
+    if (prize) {
+      setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) + prize.cost }));
     }
   };
 
@@ -2530,6 +2550,70 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                         </div>
                       ))}
                     </div>
+                  </div>
+                  </div>
+
+                  {/* Prize store redemption cancellations */}
+                  <div style={{ order: panelOrder.indexOf('prizeRedemptions') }}
+                    draggable onDragStart={() => handlePanelDragStart('prizeRedemptions')} onDragOver={(e) => handlePanelDragOver(e, 'prizeRedemptions')} onDrop={() => handlePanelDrop('prizeRedemptions')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'prizeRedemptions' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'prizeRedemptions' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
+                  <div className="bg-white rounded-3xl border border-[#D6CFC4] shadow-sm overflow-hidden mb-4">
+                    <button onClick={() => togglePanel('prizeRedemptions')} className="w-full p-4 flex items-center justify-between hover:bg-[#FAF8F5] transition-all">
+                      <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
+                        <span className="text-xl">🧾</span>
+                        <span>ביטול רכישות מהחנות</span>
+                      </h4>
+                      <span className={`text-[#8C8479] transition-transform ${collapsedPanels['prizeRedemptions'] ? '' : 'rotate-180'}`}>▼</span>
+                    </button>
+                    {!collapsedPanels['prizeRedemptions'] && (
+                    <div className="p-6 pt-0 space-y-4">
+                      <p className="text-xs text-[#8C8479]">ביטול רכישה מחזיר לילד את הנקודות שהוציא עליה.</p>
+                      {CHILDREN.every(c => (redeemedPrizes[c.id] || []).length === 0) ? (
+                        <p className="text-xs text-[#8C8479] text-center py-2">אין עדיין רכישות מהחנות.</p>
+                      ) : (
+                        CHILDREN.map(child => {
+                          const childHistory = redeemedPrizes[child.id] || [];
+                          if (childHistory.length === 0) return null;
+                          return (
+                            <div key={child.id} className="space-y-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <img src={child.photo} alt={child.name} className="w-5 h-5 rounded-full object-cover object-top" />
+                                <span className="text-xs font-bold text-[#5D4037]">{child.name}</span>
+                              </div>
+                              <div className="space-y-1">
+                                {childHistory.slice().reverse().map((r, i) => {
+                                  const prize = PRIZE_STORE.find(p => p.id === r.prizeId);
+                                  if (!prize) return null;
+                                  const originalIndex = childHistory.length - 1 - i;
+                                  return (
+                                    <div key={r.id || `${child.id}-${originalIndex}`} className="flex items-center justify-between gap-2 p-2 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2]">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-lg">{prize.emoji}</span>
+                                        <div className="min-w-0">
+                                          <p className="text-xs font-bold text-[#4A4540] truncate">{prize.name}</p>
+                                          <p className="text-[10px] text-[#8C8479]">
+                                            {new Date(r.date).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} • {prize.cost} נק׳
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <button
+                                        onClick={() => cancelPrizeRedemption(child.id, r.id, originalIndex)}
+                                        className="px-2.5 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-all"
+                                        title="בטל רכישה והחזר נקודות"
+                                      >
+                                        <span>↩️</span>
+                                        <span>בטל</span>
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    )}
                   </div>
                   </div>
 
