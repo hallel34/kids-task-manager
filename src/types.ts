@@ -12,6 +12,8 @@ export interface Task {
   photo?: string;       // Base64 Data URL or file string of captured proof
   photoTime?: string;   // Local time string when captured
   requiresPhoto?: boolean; // Requires camera photo proof to complete
+  points?: number; // Fixed point value overriding the child's flat mandatory/optional
+                    // rate (SCREEN_TIME_REWARD) - used by weekly missions.
 }
 
 export interface Child {

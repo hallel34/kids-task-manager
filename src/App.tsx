@@ -3,6 +3,7 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { useCloudSync } from './hooks/useCloudSync';
 import { useRewardsSync } from './hooks/useRewardsSync';
 import { useFindDevice } from './hooks/useFindDevice';
+import { EmojiConfettiBurst } from './components/EmojiConfettiBurst';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
 import { getLocalDateKey } from './utils/date';
 import type { Task, Child, TimeOfDay, ViewMode } from './types';
@@ -25,8 +26,15 @@ import {
   getTasksForToday,
   getEarnedScreenTime,
   buildTasksForDayType,
+  isPrizeOnCooldown,
+  getPrizeCooldownRemainingMs,
+  formatCooldownRemaining,
+  getAvailablePrizes,
+  getPrizesOnCooldown,
+  computeRedemptionStats,
 } from './data/tasksData';
-import type { PrizeItem } from './data/tasksData';
+import type { PrizeItem, RedemptionRecord, PendingApprovalRecord } from './data/tasksData';
+import { usePrizeStoreSync } from './hooks/usePrizeStoreSync';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Check, 
@@ -131,12 +139,20 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     CHILDREN.forEach(c => { t[c.id] = 0; });
     return t;
   });
-  const [redeemedPrizes, setRedeemedPrizes] = useLocalStorage<Record<string, { id: string; prizeId: string; date: string }[]>>('hallel_redeemed_prizes', () => {
-    const t: Record<string, { id: string; prizeId: string; date: string }[]> = {};
+  const [redeemedPrizes, setRedeemedPrizes] = useLocalStorage<Record<string, RedemptionRecord[]>>('hallel_redeemed_prizes', () => {
+    const t: Record<string, RedemptionRecord[]> = {};
+    CHILDREN.forEach(c => { t[c.id] = []; });
+    return t;
+  });
+  const [pendingApprovals, setPendingApprovals] = useLocalStorage<Record<string, PendingApprovalRecord[]>>('hallel_pending_approvals', () => {
+    const t: Record<string, PendingApprovalRecord[]> = {};
     CHILDREN.forEach(c => { t[c.id] = []; });
     return t;
   });
   const [showPrizeStore, setShowPrizeStore] = useState<boolean>(false);
+  // Transient UI state for the redemption animation - not persisted, purely visual.
+  const [redemptionSuccessInfo, setRedemptionSuccessInfo] = useState<{ prize: PrizeItem; awaitingApproval: boolean } | null>(null);
+  const [pointsTickDisplay, setPointsTickDisplay] = useState<number | null>(null);
 
   // --- STREAK SYSTEM ---
   const [streaks, setStreaks] = useLocalStorage<Record<string, { count: number; lastDate: string }>>('hallel_streaks', () => {
@@ -177,9 +193,8 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   const getTasksForDayOfWeek = (childId: string, day: EditDay): Task[] => {
     if (day === 'today') return tasks[childId] || [];
     const dayNum = parseInt(day);
-    const isFridayPreview = dayNum === 5;
-    const assignments = previewDutyAssignments(isFridayPreview);
-    return buildTasksForDayType(childId, isFridayPreview, assignments, customDayTasks);
+    const assignments = previewDutyAssignments(dayNum === 5);
+    return buildTasksForDayType(childId, dayNum, assignments, customDayTasks);
   };
 
   // Add task to a specific day template
@@ -244,7 +259,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   const togglePanel = (id: string) => setCollapsedPanels(prev => ({ ...prev, [id]: !prev[id] }));
 
   // --- DASHBOARD PANEL DRAG & DROP ORDER ---
-  const DEFAULT_PANEL_ORDER = ['tracker', 'photos', 'smileys', 'prizeRedemptions', 'editor', 'mashov', 'technical', 'findDevice'];
+  const DEFAULT_PANEL_ORDER = ['tracker', 'photos', 'smileys', 'prizeRedemptions', 'prizeApprovals', 'prizeStats', 'editor', 'mashov', 'technical', 'findDevice'];
   const [panelOrder, setPanelOrder] = useLocalStorage<string[]>('hallel_panel_order', () => {
     const saved = localStorage.getItem('hallel_panel_order');
     if (saved) {
@@ -313,11 +328,11 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   // same buildTasksForDayType() the day-of-week editor preview uses, so
   // the two can never disagree about what a given day's tasks are.
   const buildFreshTasksForToday = (): Record<string, Task[]> => {
-    const isFridayToday = new Date().getDay() === 5;
+    const todayDayOfWeek = new Date().getDay();
     const dutyAssignments = getDailyDutyAssignments();
     const base: Record<string, Task[]> = {};
     CHILDREN.forEach(c => {
-      base[c.id] = buildTasksForDayType(c.id, isFridayToday, dutyAssignments, customDayTasks);
+      base[c.id] = buildTasksForDayType(c.id, todayDayOfWeek, dutyAssignments, customDayTasks);
     });
     return base;
   };
@@ -356,6 +371,11 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   // and a device that didn't see today's celebration yet could show the
   // "כל הכבוד" popup again for something another device already celebrated.
   useRewardsSync(familyCode, syncEnabled, smileyCount, setSmileyCount, giftsRedeemed, setGiftsRedeemed, celebrationShown, setCelebrationShown);
+
+  // Points/redemption-history/pending-approvals cross-device sync - critical
+  // for the premium-reward approval flow, where a child's request on one
+  // device must reach a parent's approval screen on another.
+  usePrizeStoreSync(familyCode, syncEnabled, childPoints, setChildPoints, redeemedPrizes, setRedeemedPrizes, pendingApprovals, setPendingApprovals);
 
   // Subscribes in real time regardless of parent/child view - the device
   // must ring the moment a family member remotely triggers it, no matter
@@ -508,7 +528,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
         }, 5000);
         
         // Award points for completing task
-        awardPointsForTask(childId, task.mandatory);
+        awardPointsForTask(childId, task);
       }
       
       setTasks((prev) => {
@@ -633,22 +653,33 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   };
 
   // --- PRIZE STORE REDEMPTION ---
+  // Non-premium items only - premium (requiresApproval) items go through
+  // requestPrizeApproval() instead, see below.
   const redeemPrize = (childId: string, prize: PrizeItem) => {
+    if (prize.requiresApproval) return;
+    if (isPrizeOnCooldown(prize, childId, redeemedPrizes)) return;
     if ((childPoints[childId] || 0) >= prize.cost) {
       setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) - prize.cost }));
+      const now = Date.now();
       setRedeemedPrizes(prev => ({
         ...prev,
-        [childId]: [...(prev[childId] || []), { id: `redeem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, prizeId: prize.id, date: new Date().toISOString() }]
+        [childId]: [...(prev[childId] || []), {
+          id: `redeem_${now}_${Math.random().toString(36).slice(2, 8)}`,
+          prizeId: prize.id,
+          date: new Date(now).toISOString(),
+          ...(prize.cooldownHours ? { cooldownUntil: now + prize.cooldownHours * 3600_000 } : {}),
+        }]
       }));
     }
   };
 
   // Cancel a purchase from the prize store (parent-only, see the "ביטול
-  // רכישות" panel) - refunds the points it cost and removes the record.
-  // Older redemptions saved before the `id` field existed have no id to
-  // match on, so fall back to matching by array position instead (an
-  // `id` match must never fall back to position - two undefined ids would
-  // otherwise both "match" the first such record found).
+  // רכישות" panel) - refunds the points it cost, removes the record, and
+  // (since the cooldown lives on the record itself) automatically lifts
+  // whatever cooldown it had started. Older redemptions saved before the
+  // `id` field existed have no id to match on, so fall back to matching by
+  // array position instead (an `id` match must never fall back to position -
+  // two undefined ids would otherwise both "match" the first record found).
   const cancelPrizeRedemption = (childId: string, redemptionId: string | undefined, fallbackIndex: number) => {
     const list = redeemedPrizes[childId] || [];
     const record = redemptionId ? list.find((r) => r.id === redemptionId) : list[fallbackIndex];
@@ -661,6 +692,87 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     if (prize) {
       setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) + prize.cost }));
     }
+  };
+
+  // --- PREMIUM PRIZE APPROVAL FLOW ---
+  // Child-initiated: creates a pending request, does NOT touch points yet.
+  // Only one outstanding request per prize per child at a time.
+  const requestPrizeApproval = (childId: string, prize: PrizeItem) => {
+    if (!prize.requiresApproval) return;
+    const alreadyPending = (pendingApprovals[childId] || []).some((p) => p.prizeId === prize.id);
+    if (alreadyPending) return;
+    setPendingApprovals(prev => ({
+      ...prev,
+      [childId]: [...(prev[childId] || []), {
+        id: `pending_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        prizeId: prize.id,
+        requestedAt: new Date().toISOString(),
+      }]
+    }));
+  };
+
+  // Parent-initiated (see the "אישור פרסים" panel): only now do points get
+  // deducted and the cooldown (if any) start.
+  const approvePendingRedemption = (childId: string, approvalId: string) => {
+    const record = (pendingApprovals[childId] || []).find((p) => p.id === approvalId);
+    if (!record) return;
+    const prize = PRIZE_STORE.find((p) => p.id === record.prizeId);
+    if (!prize || (childPoints[childId] || 0) < prize.cost) return;
+    const now = Date.now();
+    setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) - prize.cost }));
+    setRedeemedPrizes(prev => ({
+      ...prev,
+      [childId]: [...(prev[childId] || []), {
+        id: `redeem_${now}_${Math.random().toString(36).slice(2, 8)}`,
+        prizeId: prize.id,
+        date: new Date(now).toISOString(),
+        ...(prize.cooldownHours ? { cooldownUntil: now + prize.cooldownHours * 3600_000 } : {}),
+      }]
+    }));
+    setPendingApprovals(prev => ({ ...prev, [childId]: (prev[childId] || []).filter((p) => p.id !== approvalId) }));
+  };
+
+  // Parent-initiated: discard the request, no point change.
+  const rejectPendingRedemption = (childId: string, approvalId: string) => {
+    setPendingApprovals(prev => ({ ...prev, [childId]: (prev[childId] || []).filter((p) => p.id !== approvalId) }));
+  };
+
+  // Child-facing store click handler: routes to the premium (pending-approval)
+  // or normal redeem path, and drives the redemption animation (points
+  // counting down + success popup). The clicked card's own fade-out is
+  // handled separately by AnimatePresence once it naturally drops out of
+  // getAvailablePrizes()/gains a pending entry - no manual "is this card
+  // currently animating out" state needed here.
+  const handleRedeemClick = (prize: PrizeItem) => {
+    if (prize.requiresApproval) {
+      const alreadyPending = (pendingApprovals[activeChildId] || []).some((p) => p.prizeId === prize.id);
+      if (alreadyPending) return;
+      requestPrizeApproval(activeChildId, prize);
+      setRedemptionSuccessInfo({ prize, awaitingApproval: true });
+      setTimeout(() => setRedemptionSuccessInfo(null), 2500);
+      return;
+    }
+    if (isPrizeOnCooldown(prize, activeChildId, redeemedPrizes)) return;
+    const before = childPoints[activeChildId] || 0;
+    if (before < prize.cost) return;
+    redeemPrize(activeChildId, prize);
+
+    // Points-counting-down animation: step a locally-displayed value from
+    // the old balance to the new one over ~400ms.
+    const after = before - prize.cost;
+    let step = 0;
+    const totalSteps = 10;
+    const tick = setInterval(() => {
+      step++;
+      setPointsTickDisplay(Math.round(before - (before - after) * (step / totalSteps)));
+      if (step >= totalSteps) {
+        clearInterval(tick);
+        setPointsTickDisplay(null);
+      }
+    }, 40);
+
+    setRedemptionSuccessInfo({ prize, awaitingApproval: false });
+    setTimeout(() => setRedemptionSuccessInfo(null), 2200);
   };
 
   // --- STREAK UPDATE (called at end of day or when all tasks done) ---
@@ -683,14 +795,16 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   };
 
   // --- AWARD DAILY POINTS (called when task completed) ---
-  const awardPointsForTask = (childId: string, isMandatory: boolean) => {
+  // Weekly missions (e.g. the Monday cooking task) carry a fixed task.points
+  // value that overrides the child's flat mandatory/optional rate.
+  const awardPointsForTask = (childId: string, task: Task) => {
     const reward = SCREEN_TIME_REWARD[childId] || { pointsPerMandatory: 3, pointsPerOptional: 2 };
-    const points = isMandatory ? reward.pointsPerMandatory : reward.pointsPerOptional;
-    
+    const points = task.points != null ? task.points : (task.mandatory ? reward.pointsPerMandatory : reward.pointsPerOptional);
+
     // Add streak bonus
     const streak = streaks[childId];
     const streakBonus = streak && streak.count > 0 ? STREAK_BONUS_PER_DAY : 0;
-    
+
     setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) + points + streakBonus }));
   };
 
@@ -2617,6 +2731,158 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                   </div>
                   </div>
 
+                  {/* Premium prize approval requests */}
+                  <div style={{ order: panelOrder.indexOf('prizeApprovals') }}
+                    draggable onDragStart={() => handlePanelDragStart('prizeApprovals')} onDragOver={(e) => handlePanelDragOver(e, 'prizeApprovals')} onDrop={() => handlePanelDrop('prizeApprovals')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'prizeApprovals' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'prizeApprovals' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
+                  <div className="bg-white rounded-3xl border border-[#D6CFC4] shadow-sm overflow-hidden mb-4">
+                    <button onClick={() => togglePanel('prizeApprovals')} className="w-full p-4 flex items-center justify-between hover:bg-[#FAF8F5] transition-all">
+                      <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
+                        <span className="text-xl">💎</span>
+                        <span>אישור פרסים</span>
+                        {CHILDREN.reduce((sum, c) => sum + (pendingApprovals[c.id] || []).length, 0) > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white font-bold">
+                            {CHILDREN.reduce((sum, c) => sum + (pendingApprovals[c.id] || []).length, 0)}
+                          </span>
+                        )}
+                      </h4>
+                      <span className={`text-[#8C8479] transition-transform ${collapsedPanels['prizeApprovals'] ? '' : 'rotate-180'}`}>▼</span>
+                    </button>
+                    {!collapsedPanels['prizeApprovals'] && (
+                    <div className="p-6 pt-0 space-y-4">
+                      <p className="text-xs text-[#8C8479]">פרסי-על דורשים אישור לפני שהנקודות יורדות ותקופת ההמתנה מתחילה.</p>
+                      {CHILDREN.every(c => (pendingApprovals[c.id] || []).length === 0) ? (
+                        <p className="text-xs text-[#8C8479] text-center py-2">אין בקשות ממתינות לאישור.</p>
+                      ) : (
+                        CHILDREN.map(child => {
+                          const requests = pendingApprovals[child.id] || [];
+                          if (requests.length === 0) return null;
+                          return (
+                            <div key={child.id} className="space-y-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <img src={child.photo} alt={child.name} className="w-5 h-5 rounded-full object-cover object-top" />
+                                <span className="text-xs font-bold text-[#5D4037]">{child.name}</span>
+                              </div>
+                              <div className="space-y-1">
+                                {requests.map((req) => {
+                                  const prize = PRIZE_STORE.find(p => p.id === req.prizeId);
+                                  if (!prize) return null;
+                                  const canAfford = (childPoints[child.id] || 0) >= prize.cost;
+                                  return (
+                                    <div key={req.id} className="flex items-center justify-between gap-2 p-2 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2]">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-lg">{prize.emoji}</span>
+                                        <div className="min-w-0">
+                                          <p className="text-xs font-bold text-[#4A4540] truncate">{prize.name}</p>
+                                          <p className="text-[10px] text-[#8C8479]">
+                                            {new Date(req.requestedAt).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} • {prize.cost} נק׳
+                                            {!canAfford && <span className="text-red-600 font-bold"> • אין מספיק נקודות</span>}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          onClick={() => approvePendingRedemption(child.id, req.id)}
+                                          disabled={!canAfford}
+                                          title={canAfford ? 'אשר' : 'אין מספיק נקודות'}
+                                          className="px-2.5 py-1.5 bg-green-100 hover:bg-green-200 disabled:opacity-40 disabled:cursor-not-allowed text-green-700 rounded-lg text-[10px] font-bold transition-all"
+                                        >
+                                          ✅
+                                        </button>
+                                        <button
+                                          onClick={() => rejectPendingRedemption(child.id, req.id)}
+                                          title="דחה"
+                                          className="px-2.5 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-[10px] font-bold transition-all"
+                                        >
+                                          ❌
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    )}
+                  </div>
+                  </div>
+
+                  {/* Prize store statistics */}
+                  <div style={{ order: panelOrder.indexOf('prizeStats') }}
+                    draggable onDragStart={() => handlePanelDragStart('prizeStats')} onDragOver={(e) => handlePanelDragOver(e, 'prizeStats')} onDrop={() => handlePanelDrop('prizeStats')} onDragEnd={handlePanelDragEnd}
+                    className={`transition-all duration-200 ${draggedPanel === 'prizeStats' ? 'opacity-40 scale-[0.98]' : ''} ${dragOverPanel === 'prizeStats' ? 'ring-2 ring-[#8A9A5B] ring-offset-2 rounded-3xl' : ''}`}>
+                  <div className="bg-white rounded-3xl border border-[#D6CFC4] shadow-sm overflow-hidden mb-4">
+                    <button onClick={() => togglePanel('prizeStats')} className="w-full p-4 flex items-center justify-between hover:bg-[#FAF8F5] transition-all">
+                      <h4 className="font-bold text-[#5D4037] text-lg flex items-center gap-2">
+                        <span className="text-xl">📊</span>
+                        <span>סטטיסטיקות פרסים</span>
+                      </h4>
+                      <span className={`text-[#8C8479] transition-transform ${collapsedPanels['prizeStats'] ? '' : 'rotate-180'}`}>▼</span>
+                    </button>
+                    {!collapsedPanels['prizeStats'] && (() => {
+                      const stats = computeRedemptionStats(redeemedPrizes);
+                      const categoryNames: Record<string, string> = {
+                        screen: '📱 זמן מסך', privilege: '👑 פריבילגיות', treat: '🍬 פינוקים', family: '👨‍👩‍👧‍👦 פעילות משפחתית', premium: '💎 פרסי על',
+                      };
+                      return (
+                        <div className="p-6 pt-0 space-y-4">
+                          {stats.totalRedemptions === 0 ? (
+                            <p className="text-xs text-[#8C8479] text-center py-2">עדיין אין נתונים להצגה.</p>
+                          ) : (
+                            <>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2] text-center">
+                                  <p className="text-lg font-bold text-[#5D4037]">{stats.totalRedemptions}</p>
+                                  <p className="text-[10px] text-[#8C8479]">סה״כ פרסים שנפדו</p>
+                                </div>
+                                <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2] text-center">
+                                  <p className="text-lg font-bold text-[#5D4037]">{stats.totalPointsSpent}</p>
+                                  <p className="text-[10px] text-[#8C8479]">נקודות שהוצאו</p>
+                                </div>
+                                {stats.mostRedeemed && (
+                                  <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2] text-center">
+                                    <p className="text-sm font-bold text-[#5D4037]">
+                                      {PRIZE_STORE.find(p => p.id === stats.mostRedeemed!.prizeId)?.emoji} {PRIZE_STORE.find(p => p.id === stats.mostRedeemed!.prizeId)?.name}
+                                    </p>
+                                    <p className="text-[10px] text-[#8C8479]">הפרס הפופולרי ({stats.mostRedeemed.count} פעמים)</p>
+                                  </div>
+                                )}
+                                {stats.favoriteCategory && (
+                                  <div className="p-3 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2] text-center">
+                                    <p className="text-sm font-bold text-[#5D4037]">{categoryNames[stats.favoriteCategory.category]}</p>
+                                    <p className="text-[10px] text-[#8C8479]">הקטגוריה המועדפת ({stats.favoriteCategory.count} פעמים)</p>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="space-y-1.5">
+                                {CHILDREN.map(child => {
+                                  const childStats = stats.perChild[child.id];
+                                  if (!childStats || childStats.count === 0) return null;
+                                  const topPrize = childStats.mostRedeemedPrizeId ? PRIZE_STORE.find(p => p.id === childStats.mostRedeemedPrizeId) : null;
+                                  return (
+                                    <div key={child.id} className="flex items-center justify-between gap-2 p-2 bg-[#FAF8F5] rounded-xl border border-[#E3DCD2]">
+                                      <div className="flex items-center gap-2">
+                                        <img src={child.photo} alt={child.name} className="w-5 h-5 rounded-full object-cover object-top" />
+                                        <span className="text-xs font-bold text-[#5D4037]">{child.name}</span>
+                                      </div>
+                                      <span className="text-[10px] text-[#8C8479]">
+                                        {childStats.count} פרסים • {childStats.pointsSpent} נק׳{topPrize ? ` • הכי אהוב: ${topPrize.emoji} ${topPrize.name}` : ''}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  </div>
+
                   {/* Task Editor */}
                   <div style={{ order: panelOrder.indexOf('editor') }}
                     draggable onDragStart={() => handlePanelDragStart('editor')} onDragOver={(e) => handlePanelDragOver(e, 'editor')} onDrop={() => handlePanelDrop('editor')} onDragEnd={handlePanelDragEnd}
@@ -3314,7 +3580,16 @@ function syncMashovToAppSheet() {
               <div className="text-center space-y-1">
                 <h2 className="text-2xl font-bold text-purple-800">🏪 חנות הפרסים</h2>
                 <p className="text-sm text-purple-600">
-                  {activeChild.name} — יתרה: <span className="font-bold text-lg">{childPoints[activeChildId] || 0}</span> נקודות ⭐
+                  {activeChild.name} — יתרה:{' '}
+                  <motion.span
+                    key={pointsTickDisplay ?? childPoints[activeChildId] ?? 0}
+                    initial={{ scale: 1.3 }}
+                    animate={{ scale: 1 }}
+                    className="font-bold text-lg inline-block"
+                  >
+                    {pointsTickDisplay ?? (childPoints[activeChildId] || 0)}
+                  </motion.span>{' '}
+                  נקודות ⭐
                 </p>
                 {(streaks[activeChildId]?.count || 0) > 0 && (
                   <p className="text-xs text-orange-600 font-bold">
@@ -3324,14 +3599,16 @@ function syncMashovToAppSheet() {
               </div>
 
               {/* Prize categories */}
-              {(['screen', 'privilege', 'treat', 'family'] as const).map(category => {
+              {(['screen', 'privilege', 'treat', 'family', 'premium'] as const).map(category => {
                 const categoryNames: Record<string, { name: string; emoji: string }> = {
                   screen: { name: 'זמן מסך', emoji: '📱' },
                   privilege: { name: 'פריבילגיות', emoji: '👑' },
                   treat: { name: 'פינוקים', emoji: '🍬' },
                   family: { name: 'פעילות משפחתית', emoji: '👨‍👩‍👧‍👦' },
+                  premium: { name: 'פרסי על', emoji: '💎' },
                 };
-                const prizes = PRIZE_STORE.filter(p => p.category === category);
+                const prizes = getAvailablePrizes(activeChildId, redeemedPrizes).filter(p => p.category === category);
+                if (prizes.length === 0) return null;
                 return (
                   <div key={category} className="space-y-2">
                     <h3 className="text-sm font-bold text-purple-700 flex items-center gap-1 border-b border-purple-200 pb-1">
@@ -3339,37 +3616,74 @@ function syncMashovToAppSheet() {
                       <span>{categoryNames[category].name}</span>
                     </h3>
                     <div className="grid grid-cols-2 gap-2">
-                      {prizes.map(prize => {
-                        const canAfford = (childPoints[activeChildId] || 0) >= prize.cost;
-                        return (
-                          <button
-                            key={prize.id}
-                            onClick={() => {
-                              if (canAfford) {
-                                redeemPrize(activeChildId, prize);
-                              }
-                            }}
-                            disabled={!canAfford}
-                            className={`p-3 rounded-xl border text-center transition-all space-y-1 ${
-                              canAfford 
-                                ? 'bg-white border-purple-200 hover:border-purple-400 hover:shadow-md cursor-pointer' 
-                                : 'bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed'
-                            }`}
-                          >
-                            <span className="text-2xl block">{prize.emoji}</span>
-                            <span className="text-[11px] font-bold text-purple-800 block">{prize.name}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              canAfford ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-500'
-                            }`}>
-                              {prize.cost} נק׳
-                            </span>
-                          </button>
-                        );
-                      })}
+                      <AnimatePresence mode="popLayout">
+                        {prizes.map(prize => {
+                          const canAfford = (childPoints[activeChildId] || 0) >= prize.cost;
+                          const isPending = (pendingApprovals[activeChildId] || []).some(p => p.prizeId === prize.id);
+                          if (isPending) {
+                            return (
+                              <motion.div
+                                key={prize.id}
+                                layout
+                                exit={{ opacity: 0, scale: 0.8 }}
+                                className="p-3 rounded-xl border text-center space-y-1 bg-amber-50 border-amber-300"
+                              >
+                                <span className="text-2xl block">{prize.emoji}</span>
+                                <span className="text-[11px] font-bold text-amber-800 block">{prize.name}</span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 inline-flex items-center gap-1">
+                                  <span>⏳</span>
+                                  <span>ממתין לאישור הורה</span>
+                                </span>
+                              </motion.div>
+                            );
+                          }
+                          return (
+                            <motion.button
+                              key={prize.id}
+                              layout
+                              exit={{ opacity: 0, scale: 0.8 }}
+                              onClick={() => handleRedeemClick(prize)}
+                              disabled={!canAfford}
+                              className={`p-3 rounded-xl border text-center transition-all space-y-1 ${
+                                !canAfford ? 'bg-gray-100 border-gray-200 opacity-50 cursor-not-allowed'
+                                : prize.category === 'premium' ? 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-300 hover:border-indigo-400 hover:shadow-md cursor-pointer'
+                                : 'bg-white border-purple-200 hover:border-purple-400 hover:shadow-md cursor-pointer'
+                              }`}
+                            >
+                              <span className="text-2xl block">{prize.emoji}</span>
+                              <span className="text-[11px] font-bold text-purple-800 block">{prize.name}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                canAfford ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-500'
+                              }`}>
+                                {prize.cost} נק׳
+                              </span>
+                            </motion.button>
+                          );
+                        })}
+                      </AnimatePresence>
                     </div>
                   </div>
                 );
               })}
+
+              {/* Coming back soon (on cooldown) */}
+              {getPrizesOnCooldown(activeChildId, redeemedPrizes).length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-bold text-purple-700 flex items-center gap-1 border-b border-purple-200 pb-1">
+                    <span>🕒</span>
+                    <span>יחזור בקרוב</span>
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {getPrizesOnCooldown(activeChildId, redeemedPrizes).map(prize => (
+                      <div key={prize.id} className="p-3 rounded-xl border text-center space-y-1 bg-gray-100 border-gray-200 opacity-70">
+                        <span className="text-2xl block grayscale">{prize.emoji}</span>
+                        <span className="text-[11px] font-bold text-gray-600 block">{prize.name}</span>
+                        <span className="text-[9px] font-bold text-gray-500 block">{formatCooldownRemaining(prize.remainingMs)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Recent redemptions */}
               {(redeemedPrizes[activeChildId] || []).length > 0 && (
@@ -3399,6 +3713,28 @@ function syncMashovToAppSheet() {
                   <li>• הצטיינות שבועית (90%+) = +{WEEKLY_EXCELLENCE_BONUS} נק׳</li>
                 </ul>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Prize redemption success popup */}
+      <AnimatePresence>
+        {redemptionSuccessInfo && (
+          <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 pointer-events-none" dir="rtl">
+            <motion.div
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              transition={{ type: 'spring', bounce: 0.5 }}
+              className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-3xl border-2 border-emerald-400 shadow-2xl p-6 max-w-xs w-full text-center space-y-2 relative overflow-hidden"
+            >
+              <EmojiConfettiBurst />
+              <span className="text-5xl block relative z-10">{redemptionSuccessInfo.prize.emoji}</span>
+              <p className="text-lg font-bold text-emerald-800 relative z-10">
+                {redemptionSuccessInfo.awaitingApproval ? 'הבקשה נשלחה לאישור ⏳' : 'הפרס מומש בהצלחה! 🎉'}
+              </p>
+              <p className="text-xs text-emerald-700 relative z-10">{redemptionSuccessInfo.prize.name}</p>
             </motion.div>
           </div>
         )}

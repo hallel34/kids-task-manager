@@ -97,6 +97,61 @@ export async function loadRewardsFromCloud(familyCode: string): Promise<{ smiley
   } catch { return null; }
 }
 
+// Save childPoints/redeemedPrizes/pendingApprovals to Firestore. Returns the
+// updatedAt stamp it wrote (see saveTasksToCloud - same versioning pattern,
+// needed so a poll can't clobber a fresh local point change or approval).
+export async function savePrizeStoreToCloud(
+  familyCode: string,
+  childPoints: Record<string, number>,
+  redeemedPrizes: Record<string, any[]>,
+  pendingApprovals: Record<string, any[]>,
+  updatedAt: number = Date.now()
+): Promise<number> {
+  const url = fsUrl(`families/${familyCode}/prizeStore/current`);
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        childPoints: { stringValue: JSON.stringify(childPoints) },
+        redeemedPrizes: { stringValue: JSON.stringify(redeemedPrizes) },
+        pendingApprovals: { stringValue: JSON.stringify(pendingApprovals) },
+        updatedAt: { integerValue: String(updatedAt) },
+      }
+    })
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Firestore prize store save failed ${resp.status}: ${err.slice(0, 100)}`);
+  }
+  return updatedAt;
+}
+
+// Load childPoints/redeemedPrizes/pendingApprovals from Firestore, with the
+// updatedAt stamp - callers must compare before applying, same reason as
+// loadTasksFromCloud.
+export async function loadPrizeStoreFromCloud(familyCode: string): Promise<{
+  childPoints: Record<string, number>;
+  redeemedPrizes: Record<string, any[]>;
+  pendingApprovals: Record<string, any[]>;
+  updatedAt: number;
+} | null> {
+  const url = fsUrl(`families/${familyCode}/prizeStore/current`);
+  const resp = await fetch(url);
+  if (resp.status === 404) return null;
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  const updatedAt = Number(data?.fields?.updatedAt?.integerValue || 0);
+  try {
+    return {
+      childPoints: JSON.parse(data?.fields?.childPoints?.stringValue || '{}'),
+      redeemedPrizes: JSON.parse(data?.fields?.redeemedPrizes?.stringValue || '{}'),
+      pendingApprovals: JSON.parse(data?.fields?.pendingApprovals?.stringValue || '{}'),
+      updatedAt,
+    };
+  } catch { return null; }
+}
+
 // Keep for backward compat - no-op listenToTasks (replaced by polling in App.tsx)
 export function listenToTasks(_userId: string, _date: string, _callback: (tasks: Record<string, any[]> | null, isLocal: boolean) => void) {
   return () => {}; // noop unsubscribe

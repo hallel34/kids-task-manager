@@ -34,23 +34,184 @@ export interface PrizeItem {
   name: string;
   emoji: string;
   cost: number;
-  category: 'screen' | 'privilege' | 'treat' | 'family';
+  category: 'screen' | 'privilege' | 'treat' | 'family' | 'premium';
+  cooldownHours?: number;     // undefined/0 = no cooldown, always available once affordable
+  requiresApproval?: boolean; // true = redeeming only creates a pending request; a parent
+                               // must approve before points are deducted and the cooldown starts
 }
 
 export const PRIZE_STORE: PrizeItem[] = [
-  { id: 'screen5', name: '5 דקות מסך', emoji: '📱', cost: 5, category: 'screen' },
-  { id: 'screen10', name: '10 דקות מסך', emoji: '🎮', cost: 10, category: 'screen' },
-  { id: 'screen20', name: '20 דקות מסך', emoji: '💻', cost: 20, category: 'screen' },
-  { id: 'late15', name: 'לישון 15 דק׳ מאוחר', emoji: '🌙', cost: 12, category: 'privilege' },
-  { id: 'choose_meal', name: 'לבחור ארוחת ערב', emoji: '🍕', cost: 15, category: 'privilege' },
-  { id: 'choose_dessert', name: 'לבחור קינוח', emoji: '🍰', cost: 8, category: 'treat' },
-  { id: 'no_chore', name: 'פטור ממשימה אחת מחר', emoji: '🎫', cost: 20, category: 'privilege' },
-  { id: 'family_game', name: 'משחק קלפים עם הורה', emoji: '🃏', cost: 10, category: 'family' },
-  { id: 'park', name: 'יציאה לפארק', emoji: '🌳', cost: 25, category: 'family' },
-  { id: 'ice_cream', name: 'גלידה!', emoji: '🍦', cost: 18, category: 'treat' },
-  { id: 'sticker', name: 'מדבקה מיוחדת', emoji: '⭐', cost: 5, category: 'treat' },
-  { id: 'movie_night', name: 'סרט משפחתי בשבת', emoji: '🎬', cost: 30, category: 'family' },
+  { id: 'screen5', name: '5 דקות מסך', emoji: '📱', cost: 5, category: 'screen', cooldownHours: 6 },
+  { id: 'screen10', name: '10 דקות מסך', emoji: '🎮', cost: 10, category: 'screen', cooldownHours: 12 },
+  { id: 'screen20', name: '20 דקות מסך', emoji: '💻', cost: 20, category: 'screen', cooldownHours: 24 },
+  { id: 'late15', name: 'לישון 15 דק׳ מאוחר', emoji: '🌙', cost: 12, category: 'privilege', cooldownHours: 24 },
+  { id: 'choose_meal', name: 'לבחור ארוחת ערב', emoji: '🍕', cost: 15, category: 'privilege', cooldownHours: 168 },
+  { id: 'choose_dessert', name: 'לבחור קינוח', emoji: '🍰', cost: 8, category: 'treat', cooldownHours: 48 },
+  { id: 'no_chore', name: 'פטור ממשימה אחת מחר', emoji: '🎫', cost: 20, category: 'privilege', cooldownHours: 48 },
+  { id: 'family_game', name: 'משחק קלפים עם הורה', emoji: '🃏', cost: 10, category: 'family', cooldownHours: 24 },
+  { id: 'park', name: 'יציאה לפארק', emoji: '🌳', cost: 25, category: 'family', cooldownHours: 72 },
+  { id: 'ice_cream', name: 'גלידה!', emoji: '🍦', cost: 18, category: 'treat', cooldownHours: 72 },
+  { id: 'sticker', name: 'מדבקה מיוחדת', emoji: '⭐', cost: 5, category: 'treat', cooldownHours: 12 },
+  { id: 'movie_night', name: 'סרט משפחתי בשבת', emoji: '🎬', cost: 30, category: 'family', cooldownHours: 168 },
+
+  // Premium tier - expensive, requires saving points, and requires a parent's
+  // explicit approval before points are deducted (see requestPrizeApproval /
+  // approvePendingRedemption / rejectPendingRedemption in App.tsx).
+  { id: 'movie_family_night', name: 'ערב סרט משפחתי', emoji: '🎬', cost: 80, category: 'premium', requiresApproval: true },
+  { id: 'choose_restaurant', name: 'לבחור מסעדה', emoji: '🍔', cost: 100, category: 'premium', requiresApproval: true },
+  { id: 'parent_surprise', name: 'הפתעת הורים', emoji: '🎁', cost: 120, category: 'premium', requiresApproval: true },
+  { id: 'sleep_late_hour', name: 'לישון שעה מאוחר יותר', emoji: '🛏️', cost: 90, category: 'premium', requiresApproval: true },
+  { id: 'family_bowling', name: 'באולינג משפחתי', emoji: '🎳', cost: 150, category: 'premium', requiresApproval: true },
+  { id: 'amusement_park', name: 'פארק שעשועים', emoji: '🎡', cost: 250, category: 'premium', requiresApproval: true },
+  { id: 'screen_full_hour', name: 'שעה שלמה של מסך', emoji: '🎮', cost: 80, category: 'premium', requiresApproval: true },
+  { id: 'small_toy', name: 'צעצוע קטן לבחירה', emoji: '🛍️', cost: 200, category: 'premium', requiresApproval: true },
+  { id: 'family_pizza', name: 'להזמין פיצה משפחתית', emoji: '🍕', cost: 180, category: 'premium', requiresApproval: true },
+  { id: 'special_day_parent', name: 'יום מיוחד עם אבא או אמא', emoji: '🏆', cost: 300, category: 'premium', requiresApproval: true },
 ];
+
+// A finalized redemption. `cooldownUntil` (epoch ms) is only present if the
+// prize had a cooldownHours - checking it is what keeps a prize out of the
+// store until the cooldown expires (see isPrizeOnCooldown below).
+export interface RedemptionRecord {
+  id: string;
+  prizeId: string;
+  date: string; // ISO - when the redemption became final (purchase time for
+                // non-premium, approval time for premium)
+  cooldownUntil?: number;
+}
+
+// A premium-reward request awaiting a parent's approve/reject - no points
+// have been deducted yet.
+export interface PendingApprovalRecord {
+  id: string;
+  prizeId: string;
+  requestedAt: string; // ISO
+}
+
+// ========== PRIZE STORE COOLDOWN / STATS HELPERS ==========
+// A prize can be redeemed many times over the app's lifetime - use the MOST
+// RECENT redemption's cooldownUntil, not just the last array entry (order
+// isn't guaranteed after a cancellation removes an earlier one).
+function _latestCooldownUntil(prizeId: string, records: RedemptionRecord[]): number {
+  return records
+    .filter((r) => r.prizeId === prizeId && r.cooldownUntil)
+    .reduce((max, r) => Math.max(max, r.cooldownUntil || 0), 0);
+}
+
+export function isPrizeOnCooldown(prize: PrizeItem, childId: string, redeemedPrizes: Record<string, RedemptionRecord[]>, now: number = Date.now()): boolean {
+  if (!prize.cooldownHours) return false;
+  const records = redeemedPrizes[childId] || [];
+  return _latestCooldownUntil(prize.id, records) > now;
+}
+
+export function getPrizeCooldownRemainingMs(prize: PrizeItem, childId: string, redeemedPrizes: Record<string, RedemptionRecord[]>, now: number = Date.now()): number {
+  if (!prize.cooldownHours) return 0;
+  const records = redeemedPrizes[childId] || [];
+  return Math.max(0, _latestCooldownUntil(prize.id, records) - now);
+}
+
+export function formatCooldownRemaining(ms: number): string {
+  const minutes = Math.ceil(ms / 60000);
+  if (minutes < 60) return `זמין שוב בעוד: ${minutes} דק׳`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 24) return `זמין שוב בעוד: ${hours} שעות`;
+  const days = Math.ceil(hours / 24);
+  return `זמין שוב בעוד: ${days} ${days === 1 ? 'יום' : 'ימים'}`;
+}
+
+export function getAvailablePrizes(childId: string, redeemedPrizes: Record<string, RedemptionRecord[]>, now: number = Date.now()): PrizeItem[] {
+  return PRIZE_STORE.filter((p) => !isPrizeOnCooldown(p, childId, redeemedPrizes, now));
+}
+
+export function getPrizesOnCooldown(childId: string, redeemedPrizes: Record<string, RedemptionRecord[]>, now: number = Date.now()): (PrizeItem & { remainingMs: number })[] {
+  return PRIZE_STORE
+    .filter((p) => isPrizeOnCooldown(p, childId, redeemedPrizes, now))
+    .map((p) => ({ ...p, remainingMs: getPrizeCooldownRemainingMs(p, childId, redeemedPrizes, now) }))
+    .sort((a, b) => a.remainingMs - b.remainingMs);
+}
+
+export interface RedemptionStats {
+  totalRedemptions: number;
+  totalPointsSpent: number;
+  mostRedeemed: { prizeId: string; count: number } | null;
+  favoriteCategory: { category: PrizeItem['category']; count: number } | null;
+  perChild: Record<string, { count: number; pointsSpent: number; mostRedeemedPrizeId: string | null }>;
+}
+
+// Pure derivation over the full (already-persisted) redemption history - no
+// separate stats state to keep in sync.
+export function computeRedemptionStats(redeemedPrizes: Record<string, RedemptionRecord[]>): RedemptionStats {
+  const prizeCounts: Record<string, number> = {};
+  const categoryCounts: Partial<Record<PrizeItem['category'], number>> = {};
+  const perChild: RedemptionStats['perChild'] = {};
+  let totalRedemptions = 0;
+  let totalPointsSpent = 0;
+
+  Object.entries(redeemedPrizes).forEach(([childId, records]) => {
+    const childPrizeCounts: Record<string, number> = {};
+    let childPoints = 0;
+    records.forEach((r) => {
+      const prize = PRIZE_STORE.find((p) => p.id === r.prizeId);
+      if (!prize) return;
+      totalRedemptions++;
+      totalPointsSpent += prize.cost;
+      childPoints += prize.cost;
+      prizeCounts[r.prizeId] = (prizeCounts[r.prizeId] || 0) + 1;
+      childPrizeCounts[r.prizeId] = (childPrizeCounts[r.prizeId] || 0) + 1;
+      categoryCounts[prize.category] = (categoryCounts[prize.category] || 0) + 1;
+    });
+    const topChildPrize = Object.entries(childPrizeCounts).sort((a, b) => b[1] - a[1])[0];
+    perChild[childId] = {
+      count: records.length,
+      pointsSpent: childPoints,
+      mostRedeemedPrizeId: topChildPrize ? topChildPrize[0] : null,
+    };
+  });
+
+  const topPrize = Object.entries(prizeCounts).sort((a, b) => b[1] - a[1])[0];
+  const topCategory = (Object.entries(categoryCounts) as [PrizeItem['category'], number][]).sort((a, b) => b[1] - a[1])[0];
+
+  return {
+    totalRedemptions,
+    totalPointsSpent,
+    mostRedeemed: topPrize ? { prizeId: topPrize[0], count: topPrize[1] } : null,
+    favoriteCategory: topCategory ? { category: topCategory[0], count: topCategory[1] } : null,
+    perChild,
+  };
+}
+
+// ========== WEEKLY MISSIONS - fixed-assignee recurring tasks (unlike the
+// randomly-rotated SHARED_DUTIES/FRIDAY_DUTIES) ==========
+export interface WeeklyMission {
+  id: string;
+  title: string;
+  emoji: string;
+  time: TimeOfDay;
+  mandatory: boolean;
+  requiresPhoto?: boolean;
+  points: number;      // fixed point value, overriding the child's flat rate
+  dayOfWeek: number;    // 0=Sun..6=Sat
+  childIds: string[];   // exactly which children get this mission
+}
+
+export const WEEKLY_MISSIONS: WeeklyMission[] = [
+  { id: 'wm_cook_dinner', title: 'בישול ארוחת ערב', emoji: '🍳', time: 'evening', mandatory: true, requiresPhoto: true, points: 30, dayOfWeek: 1, childIds: ['arava', 'hoshen'] },
+];
+
+export function getWeeklyMissionTasksFor(childId: string, dayOfWeek: number): Task[] {
+  return WEEKLY_MISSIONS
+    .filter((m) => m.dayOfWeek === dayOfWeek && m.childIds.includes(childId))
+    .map((m) => ({
+      id: m.id,
+      time: m.time,
+      title: m.title,
+      emoji: m.emoji,
+      completed: false,
+      mandatory: m.mandatory,
+      requiresPhoto: m.requiresPhoto,
+      points: m.points,
+    }));
+}
 
 // Streak bonus: consecutive days with 80%+ completion
 export const STREAK_BONUS_PER_DAY = 2; // extra points per streak day
@@ -319,30 +480,33 @@ export function getSharedDutyTasksFor(childId: string, assignments: Record<strin
     }));
 }
 
-// Single canonical builder for one child's task list on a given day-type
-// (Friday vs. a regular weekday): template + duty rotation (SHARED_DUTIES
-// on weekdays, FRIDAY_DUTIES on Friday) + any day-template custom tasks.
-// Every place that builds a day's task list - "today", the day-of-week
-// editor preview, and the nightly regeneration in App.tsx - goes through
-// this so they can't drift apart from one another.
+// Single canonical builder for one child's task list on a given day of week
+// (0=Sun..6=Sat): template (Friday vs. a regular weekday) + duty rotation
+// (SHARED_DUTIES on weekdays, FRIDAY_DUTIES on Friday) + weekly missions
+// (WEEKLY_MISSIONS, fixed-assignee tasks tied to a specific day) + any
+// day-template custom tasks. Every place that builds a day's task list -
+// "today", the day-of-week editor preview, and the nightly regeneration in
+// App.tsx - goes through this so they can't drift apart from one another.
 export function buildTasksForDayType(
   childId: string,
-  isFriday: boolean,
+  dayOfWeek: number,
   dutyAssignments: Record<string, string>,
   customDayTasks: Record<string, Task[]>
 ): Task[] {
+  const isFriday = dayOfWeek === 5;
   const base = isFriday ? getFridayTasksForChild(childId) : getInitialTasksForChild(childId);
   const shared = getSharedDutyTasksFor(childId, dutyAssignments, isFriday ? FRIDAY_DUTIES : SHARED_DUTIES);
+  const missions = getWeeklyMissionTasksFor(childId, dayOfWeek);
   const customKey = `${childId}_${isFriday ? 'friday' : 'regular'}`;
   const custom = customDayTasks[customKey] || [];
-  return [...base, ...shared, ...custom];
+  return [...base, ...shared, ...missions, ...custom];
 }
 
 // Get tasks based on day of week
 export function getTasksForToday(childId: string): Task[] {
-  const isFriday = new Date().getDay() === 5;
+  const dayOfWeek = new Date().getDay();
   const assignments = getDailyDutyAssignments();
-  return buildTasksForDayType(childId, isFriday, assignments, {});
+  return buildTasksForDayType(childId, dayOfWeek, assignments, {});
 }
 
 // Calculate earned screen time for a child - NEW: per-task points system

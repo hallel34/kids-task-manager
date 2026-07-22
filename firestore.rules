@@ -37,6 +37,23 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Prize store economy: points balance, redemption history (incl.
+    // per-redemption cooldown timestamps), and pending premium-reward
+    // approval requests. Needs cross-device sync so a child's request on
+    // one device reaches a parent's approval screen on another.
+    match /families/{familyId}/prizeStore/current {
+      allow get: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['childPoints', 'redeemedPrizes', 'pendingApprovals', 'updatedAt'])
+        && request.resource.data.childPoints is string
+        && request.resource.data.childPoints.size() < 20000
+        && request.resource.data.redeemedPrizes is string
+        && request.resource.data.redeemedPrizes.size() < 200000
+        && request.resource.data.pendingApprovals is string
+        && request.resource.data.pendingApprovals.size() < 50000
+        && request.resource.data.updatedAt is int;
+      allow delete: if false;
+    }
+
     // "Find my tablet" remote alarm command. Any device holding the family
     // code can read this (a tablet must react no matter which screen it's
     // showing - it isn't gated behind the parent PIN, which is a client-
