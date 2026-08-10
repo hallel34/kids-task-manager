@@ -540,97 +540,97 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     toggleTask(childId, taskId);
   };
 
+  // Shared side effects the moment a task actually becomes completed:
+  // 5s "recently completed" highlight, points, the play-first timer trigger,
+  // and the evening celebration. Called from BOTH toggleTask (direct
+  // checkbox) and saveCapturedTaskPhotoProof (photo-proof confirmation) -
+  // this used to live only inside toggleTask, which meant a photo-gated
+  // task (toggleTask short-circuits to open the camera instead of
+  // completing it directly) silently skipped points/celebration/timer
+  // entirely when confirmed via the camera flow instead of a plain click.
+  // `updatedList` is this child's task list with `task` already marked
+  // completed - callers compute it synchronously since they already know
+  // exactly what's about to change, rather than reaching into a setTasks
+  // updater (which React can in principle invoke more than once).
+  const runTaskCompletionEffects = (childId: string, task: Task, updatedList: Task[]) => {
+    const key = `${childId}-${task.id}`;
+    setRecentlyCompleted(prev => new Set(prev).add(key));
+    setTimeout(() => {
+      setRecentlyCompleted(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }, 5000);
+
+    awardPointsForTask(childId, task);
+
+    // "Play first, screen later": does this complete ALL mandatory tasks
+    // for this task's time period? Keyed per date+period so re-completing
+    // tasks in an already-finished period never restarts it, and each
+    // period (morning/afternoon/evening) gets its own independent timer.
+    const periodMandatory = updatedList.filter((t) => t.time === task.time && t.mandatory);
+    const periodNowDone = periodMandatory.length > 0 && periodMandatory.every((t) => t.completed);
+    if (periodNowDone) {
+      const triggerKey = `${getLocalDateKey()}_${task.time}`;
+      const existingTimer = playTimers[childId];
+      if (!existingTimer || existingTimer.key !== triggerKey) {
+        setPlayTimers(prev => ({ ...prev, [childId]: { key: triggerKey, endsAt: Date.now() + PLAY_TIMER_MINUTES * 60000 } }));
+        setPlayTimerPopupChild(childId);
+      }
+    }
+
+    // Evening celebration: all evening-mandatory tasks done today?
+    const eveningMandatory = updatedList.filter(t => t.time === 'evening' && t.mandatory);
+    const allEveningDone = eveningMandatory.length > 0 && eveningMandatory.every(t => t.completed);
+    const today = new Date().toDateString();
+    if (allEveningDone && celebrationShown[childId] !== today) {
+      setTimeout(() => {
+        setSmileyCount(prev => ({ ...prev, [childId]: (prev[childId] || 0) + 1 }));
+        setCelebrationChild(childId);
+        setCelebrationShown(prev => ({ ...prev, [childId]: today }));
+
+        const allMandatory = updatedList.filter(t => t.mandatory);
+        const completedAll = allMandatory.filter(t => t.completed).length;
+        const completionPercent = allMandatory.length > 0 ? completedAll / allMandatory.length : 0;
+        updateStreak(childId, completionPercent);
+
+        const childStreak = streaks[childId];
+        if (childStreak && childStreak.count > 0 && childStreak.count % 7 === 0) {
+          setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) + STREAK_WEEKLY_BONUS }));
+        }
+      }, 300);
+    }
+  };
+
   const toggleTask = (childId: string, taskId: string) => {
     const list = tasks[childId] || [];
     const task = list.find((t) => t.id === taskId);
-    
+
     if (task) {
       if (task.requiresPhoto && !task.completed && !task.photo) {
         setCaptureTaskTarget({ childId, taskId });
         return;
       }
-      
-      // If completing (not uncompleting), add to recently completed for 5s fade
-      if (!task.completed) {
-        const key = `${childId}-${taskId}`;
-        setRecentlyCompleted(prev => new Set(prev).add(key));
-        setTimeout(() => {
-          setRecentlyCompleted(prev => {
-            const next = new Set(prev);
-            next.delete(key);
-            return next;
-          });
-        }, 5000);
-        
-        // Award points for completing task
-        awardPointsForTask(childId, task);
 
-        // "Play first, screen later": if this completes ALL mandatory tasks
-        // for this task's time period, start a 30-min timer for this child -
-        // screen-time prizes lock until it ends. Computed synchronously
-        // here (not inside the setTasks updater below) against what the
-        // list WILL look like after this toggle, keyed per date+period so
-        // re-completing tasks in an already-finished period never restarts
-        // it, and each period (morning/afternoon/evening) gets its own
-        // independent timer as it's finished.
-        const periodMandatory = list
-          .map((t) => (t.id === taskId ? { ...t, completed: true } : t))
-          .filter((t) => t.time === task.time && t.mandatory);
-        const periodNowDone = periodMandatory.length > 0 && periodMandatory.every((t) => t.completed);
-        if (periodNowDone) {
-          const triggerKey = `${getLocalDateKey()}_${task.time}`;
-          const existingTimer = playTimers[childId];
-          if (!existingTimer || existingTimer.key !== triggerKey) {
-            setPlayTimers(prev => ({ ...prev, [childId]: { key: triggerKey, endsAt: Date.now() + PLAY_TIMER_MINUTES * 60000 } }));
-            setPlayTimerPopupChild(childId);
-          }
-        }
+      if (!task.completed) {
+        const updatedList = list.map((t) => (t.id === taskId ? { ...t, completed: true } : t));
+        runTaskCompletionEffects(childId, task, updatedList);
       }
 
-      setTasks((prev) => {
-        const newTasks = {
-          ...prev,
-          [childId]: prev[childId].map((t) =>
-            t.id === taskId 
-              ? { 
-                  ...t, 
-                  completed: !t.completed,
-                  photo: !t.completed ? t.photo : undefined,
-                  photoTime: !t.completed ? t.photoTime : undefined
-                } 
-              : t
-          ),
-        };
-        
-        // Check if all evening mandatory tasks are now complete → trigger celebration
-        const updatedChildTasks = newTasks[childId];
-        const eveningMandatory = updatedChildTasks.filter(t => t.time === 'evening' && t.mandatory);
-        const allEveningDone = eveningMandatory.length > 0 && eveningMandatory.every(t => t.completed);
-        const today = new Date().toDateString();
-        
-        if (allEveningDone && celebrationShown[childId] !== today) {
-          // Award smiley and show celebration!
-          setTimeout(() => {
-            setSmileyCount(prev => ({ ...prev, [childId]: (prev[childId] || 0) + 1 }));
-            setCelebrationChild(childId);
-            setCelebrationShown(prev => ({ ...prev, [childId]: today }));
-            
-            // Update streak - calculate completion percentage
-            const allMandatory = updatedChildTasks.filter(t => t.mandatory);
-            const completedAll = allMandatory.filter(t => t.completed).length;
-            const completionPercent = allMandatory.length > 0 ? completedAll / allMandatory.length : 0;
-            updateStreak(childId, completionPercent);
-            
-            // Award streak weekly bonus if reached 7
-            const childStreak = streaks[childId];
-            if (childStreak && childStreak.count > 0 && childStreak.count % 7 === 0) {
-              setChildPoints(prev => ({ ...prev, [childId]: (prev[childId] || 0) + STREAK_WEEKLY_BONUS }));
-            }
-          }, 300);
-        }
-        
-        return newTasks;
-      });
+      setTasks((prev) => ({
+        ...prev,
+        [childId]: prev[childId].map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                completed: !t.completed,
+                photo: !t.completed ? t.photo : undefined,
+                photoTime: !t.completed ? t.photoTime : undefined
+              }
+            : t
+        ),
+      }));
     }
   };
 
@@ -955,6 +955,8 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     if (captureTaskTarget && cameraPhotoFile) {
       const { childId, taskId } = captureTaskTarget;
       const localTimeStr = new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+      const list = tasks[childId] || [];
+      const task = list.find((t) => t.id === taskId);
 
       setTasks((prev) => ({
         ...prev,
@@ -962,6 +964,14 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
           t.id === taskId ? { ...t, photo: cameraPhotoFile, photoTime: localTimeStr, completed: true } : t
         ),
       }));
+
+      // Same completion side effects as a direct checkbox toggle (points,
+      // play-timer, evening celebration) - photo-gated tasks completing
+      // via this camera flow must not skip them.
+      if (task && !task.completed) {
+        const updatedList = list.map((t) => (t.id === taskId ? { ...t, completed: true } : t));
+        runTaskCompletionEffects(childId, task, updatedList);
+      }
 
       // Auto clear and close modal
       setCameraPhotoFile(null);
