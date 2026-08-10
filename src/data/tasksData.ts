@@ -38,12 +38,13 @@ export interface PrizeItem {
   cooldownHours?: number;     // undefined/0 = no cooldown, always available once affordable
   requiresApproval?: boolean; // true = redeeming only creates a pending request; a parent
                                // must approve before points are deducted and the cooldown starts
+  isScreenTime?: boolean;     // true = locked while the child has an active "play first" timer
 }
 
 export const PRIZE_STORE: PrizeItem[] = [
-  { id: 'screen5', name: '5 דקות מסך', emoji: '📱', cost: 5, category: 'screen', cooldownHours: 6 },
-  { id: 'screen10', name: '10 דקות מסך', emoji: '🎮', cost: 10, category: 'screen', cooldownHours: 12 },
-  { id: 'screen20', name: '20 דקות מסך', emoji: '💻', cost: 20, category: 'screen', cooldownHours: 24 },
+  { id: 'screen5', name: '5 דקות מסך', emoji: '📱', cost: 5, category: 'screen', cooldownHours: 6, isScreenTime: true },
+  { id: 'screen10', name: '10 דקות מסך', emoji: '🎮', cost: 10, category: 'screen', cooldownHours: 12, isScreenTime: true },
+  { id: 'screen20', name: '20 דקות מסך', emoji: '💻', cost: 20, category: 'screen', cooldownHours: 24, isScreenTime: true },
   { id: 'late15', name: 'לישון 15 דק׳ מאוחר', emoji: '🌙', cost: 12, category: 'privilege', cooldownHours: 24 },
   { id: 'choose_meal', name: 'לבחור ארוחת ערב', emoji: '🍕', cost: 15, category: 'privilege', cooldownHours: 168 },
   { id: 'choose_dessert', name: 'לבחור קינוח', emoji: '🍰', cost: 8, category: 'treat', cooldownHours: 48 },
@@ -63,7 +64,7 @@ export const PRIZE_STORE: PrizeItem[] = [
   { id: 'sleep_late_hour', name: 'לישון שעה מאוחר יותר', emoji: '🛏️', cost: 90, category: 'premium', requiresApproval: true },
   { id: 'family_bowling', name: 'באולינג משפחתי', emoji: '🎳', cost: 150, category: 'premium', requiresApproval: true },
   { id: 'amusement_park', name: 'פארק שעשועים', emoji: '🎡', cost: 250, category: 'premium', requiresApproval: true },
-  { id: 'screen_full_hour', name: 'שעה שלמה של מסך', emoji: '🎮', cost: 80, category: 'premium', requiresApproval: true },
+  { id: 'screen_full_hour', name: 'שעה שלמה של מסך', emoji: '🎮', cost: 80, category: 'premium', requiresApproval: true, isScreenTime: true },
   { id: 'small_toy', name: 'צעצוע קטן לבחירה', emoji: '🛍️', cost: 200, category: 'premium', requiresApproval: true },
   { id: 'family_pizza', name: 'להזמין פיצה משפחתית', emoji: '🍕', cost: 180, category: 'premium', requiresApproval: true },
   { id: 'special_day_parent', name: 'יום מיוחד עם אבא או אמא', emoji: '🏆', cost: 300, category: 'premium', requiresApproval: true },
@@ -86,6 +87,22 @@ export interface PendingApprovalRecord {
   id: string;
   prizeId: string;
   requestedAt: string; // ISO
+}
+
+// "Play first, screen later": a per-child timer started the moment they
+// finish all mandatory tasks for a time period (see toggleTask in App.tsx).
+// `key` (e.g. "2026-08-10_evening") identifies which period triggered it,
+// so re-completing tasks in an already-finished period doesn't restart it.
+// `endsAt` is an absolute epoch-ms timestamp so the countdown survives a
+// page refresh with no special handling.
+export interface PlayTimerRecord {
+  key: string;
+  endsAt: number;
+}
+
+export function isPlayTimerActive(childId: string, playTimers: Record<string, PlayTimerRecord>, now: number = Date.now()): boolean {
+  const record = playTimers[childId];
+  return !!record && record.endsAt > now;
 }
 
 // ========== PRIZE STORE COOLDOWN / STATS HELPERS ==========

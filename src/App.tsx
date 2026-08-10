@@ -32,8 +32,9 @@ import {
   getAvailablePrizes,
   getPrizesOnCooldown,
   computeRedemptionStats,
+  isPlayTimerActive,
 } from './data/tasksData';
-import type { PrizeItem, RedemptionRecord, PendingApprovalRecord } from './data/tasksData';
+import type { PrizeItem, RedemptionRecord, PendingApprovalRecord, PlayTimerRecord } from './data/tasksData';
 import { usePrizeStoreSync } from './hooks/usePrizeStoreSync';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -70,6 +71,16 @@ interface AppProps {
   familyData?: import('./useAuth').FamilyData;
   userId?: string;
   onSignOut?: () => void;
+}
+
+// mm:ss countdown display for the play-first timer badge - separate from
+// formatCooldownRemaining (tasksData.ts), which is day/hour granularity for
+// prize cooldowns, not the second-by-second precision this needs.
+function formatPlayTimerRemaining(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
@@ -153,6 +164,16 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   // Transient UI state for the redemption animation - not persisted, purely visual.
   const [redemptionSuccessInfo, setRedemptionSuccessInfo] = useState<{ prize: PrizeItem; awaitingApproval: boolean } | null>(null);
   const [pointsTickDisplay, setPointsTickDisplay] = useState<number | null>(null);
+
+  // "Play first, screen later" - a 30-minute per-child timer that starts the
+  // moment a child finishes all mandatory tasks for a time period; screen-
+  // time prizes stay locked in the store until it ends. Local-only (not
+  // cloud-synced) since redemption happens on the same device the tasks
+  // were completed on.
+  const PLAY_TIMER_MINUTES = 30;
+  const [playTimers, setPlayTimers] = useLocalStorage<Record<string, PlayTimerRecord>>('hallel_play_timers', {});
+  const [playTimerPopupChild, setPlayTimerPopupChild] = useState<string | null>(null);
+  const [tickNow, setTickNow] = useState<number>(Date.now());
 
   // --- STREAK SYSTEM ---
   const [streaks, setStreaks] = useLocalStorage<Record<string, { count: number; lastDate: string }>>('hallel_streaks', () => {
@@ -405,6 +426,20 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     return () => clearInterval(interval);
   }, []);
 
+  // Drives the play-timer countdown display (1s resolution, unlike the 60s
+  // clock tick above) - only runs while at least one child actually has an
+  // active timer, and self-clears the moment the last one expires so it
+  // doesn't tick forever in the background once nobody needs it.
+  useEffect(() => {
+    const hasActiveTimer = () => CHILDREN.some(c => isPlayTimerActive(c.id, playTimers));
+    if (!hasActiveTimer()) return;
+    const tickInterval = setInterval(() => {
+      setTickNow(Date.now());
+      if (!hasActiveTimer()) clearInterval(tickInterval);
+    }, 1000);
+    return () => clearInterval(tickInterval);
+  }, [playTimers]);
+
   // Regenerate tasks ONLY when the calendar date actually advances (e.g. a
   // tablet left open past midnight) - never on a time-of-day (morning/
   // afternoon/evening) change, which is just a display filter and doesn't
@@ -529,8 +564,29 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
         
         // Award points for completing task
         awardPointsForTask(childId, task);
+
+        // "Play first, screen later": if this completes ALL mandatory tasks
+        // for this task's time period, start a 30-min timer for this child -
+        // screen-time prizes lock until it ends. Computed synchronously
+        // here (not inside the setTasks updater below) against what the
+        // list WILL look like after this toggle, keyed per date+period so
+        // re-completing tasks in an already-finished period never restarts
+        // it, and each period (morning/afternoon/evening) gets its own
+        // independent timer as it's finished.
+        const periodMandatory = list
+          .map((t) => (t.id === taskId ? { ...t, completed: true } : t))
+          .filter((t) => t.time === task.time && t.mandatory);
+        const periodNowDone = periodMandatory.length > 0 && periodMandatory.every((t) => t.completed);
+        if (periodNowDone) {
+          const triggerKey = `${getLocalDateKey()}_${task.time}`;
+          const existingTimer = playTimers[childId];
+          if (!existingTimer || existingTimer.key !== triggerKey) {
+            setPlayTimers(prev => ({ ...prev, [childId]: { key: triggerKey, endsAt: Date.now() + PLAY_TIMER_MINUTES * 60000 } }));
+            setPlayTimerPopupChild(childId);
+          }
+        }
       }
-      
+
       setTasks((prev) => {
         const newTasks = {
           ...prev,
@@ -744,6 +800,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   // getAvailablePrizes()/gains a pending entry - no manual "is this card
   // currently animating out" state needed here.
   const handleRedeemClick = (prize: PrizeItem) => {
+    if (prize.isScreenTime && isPlayTimerActive(activeChildId, playTimers)) return;
     if (prize.requiresApproval) {
       const alreadyPending = (pendingApprovals[activeChildId] || []).some((p) => p.prizeId === prize.id);
       if (alreadyPending) return;
@@ -1731,6 +1788,16 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                           <span className="text-indigo-600 font-bold">🎮 {childScreenTime.earned} דק׳</span>
                         )}
                       </div>
+
+                      {/* Play-first timer countdown - screen-time prizes are locked until this hits 0 */}
+                      {isPlayTimerActive(child.id, playTimers, tickNow) && (
+                        <div className="flex items-center justify-center gap-1.5 bg-indigo-50 border border-indigo-200 rounded-xl py-1.5">
+                          <span className="text-xs">⏳</span>
+                          <span className="text-[10px] font-bold text-indigo-700">
+                            זמן משחק · מסך בעוד {formatPlayTimerRemaining(playTimers[child.id].endsAt - tickNow)}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Tasks list */}
                       <div className="space-y-1 max-h-[400px] overflow-y-auto">
@@ -3560,6 +3627,38 @@ function syncMashovToAppSheet() {
         )}
       </AnimatePresence>
 
+      {/* 3b. PLAY-FIRST TIMER POPUP - shown when a time period's mandatory
+          tasks are just finished; the countdown itself lives on the child's
+          card in the main grid below so it stays visible after this closes. */}
+      <AnimatePresence>
+        {playTimerPopupChild && (
+          <div className="fixed inset-0 bg-indigo-950/60 backdrop-blur-sm z-[62] flex items-center justify-center p-4" dir="rtl" onClick={() => setPlayTimerPopupChild(null)}>
+            <motion.div
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              transition={{ type: 'spring', bounce: 0.5 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-3xl border-2 border-indigo-400 shadow-2xl p-8 max-w-md w-full text-center space-y-4"
+            >
+              <span className="text-6xl block">🎮⏳</span>
+              <h2 className="text-2xl font-bold text-indigo-800">
+                עכשיו זמן משחק חופשי, {CHILDREN.find(c => c.id === playTimerPopupChild)?.name}!
+              </h2>
+              <p className="text-base text-indigo-700">
+                כל הכבוד על סיום המשימות! זמן המסך ייפתח בעוד {PLAY_TIMER_MINUTES} דקות.
+              </p>
+              <button
+                onClick={() => setPlayTimerPopupChild(null)}
+                className="px-8 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-2xl font-bold text-lg transition-all shadow-lg"
+              >
+                הבנתי! 👍
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* 4. PRIZE STORE MODAL */}
       <AnimatePresence>
         {showPrizeStore && (
@@ -3633,6 +3732,23 @@ function syncMashovToAppSheet() {
                                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 inline-flex items-center gap-1">
                                   <span>⏳</span>
                                   <span>ממתין לאישור הורה</span>
+                                </span>
+                              </motion.div>
+                            );
+                          }
+                          if (prize.isScreenTime && isPlayTimerActive(activeChildId, playTimers, tickNow)) {
+                            return (
+                              <motion.div
+                                key={prize.id}
+                                layout
+                                exit={{ opacity: 0, scale: 0.8 }}
+                                className="p-3 rounded-xl border text-center space-y-1 bg-indigo-50 border-indigo-200 opacity-80"
+                              >
+                                <span className="text-2xl block grayscale">{prize.emoji}</span>
+                                <span className="text-[11px] font-bold text-indigo-700 block">{prize.name}</span>
+                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 inline-flex items-center gap-1">
+                                  <span>🔒</span>
+                                  <span>קודם זמן משחק · {formatPlayTimerRemaining(playTimers[activeChildId].endsAt - tickNow)}</span>
                                 </span>
                               </motion.div>
                             );
