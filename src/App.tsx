@@ -893,10 +893,11 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   const startCameraStream = async () => {
     try {
       setCameraPhotoFile(null);
-      // Try back camera first (environment), fall back to any camera
+      // Front camera (selfie-style, for the child photographing themselves
+      // doing the task) first, fall back to any camera if unavailable.
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       } catch {
         stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
