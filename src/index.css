@@ -4,3 +4,11 @@
 html, body {
   overscroll-behavior-y: contain;
 }
+
+/* Block pinch-zoom and double-tap-zoom on touch devices. The viewport meta
+   tag's user-scalable=no covers most browsers, but iOS Safari has stopped
+   fully honoring it - touch-action is the more reliable belt-and-suspenders
+   fix for pinch specifically. pan-x/pan-y still allow normal scrolling. */
+html, body {
+  touch-action: pan-x pan-y;
+}
