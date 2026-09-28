@@ -5,7 +5,7 @@ import { useRewardsSync } from './hooks/useRewardsSync';
 import { useFindDevice } from './hooks/useFindDevice';
 import { EmojiConfettiBurst } from './components/EmojiConfettiBurst';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
-import { getLocalDateKey } from './utils/date';
+import { getLocalDateKey, getChildAge } from './utils/date';
 import type { Task, Child, TimeOfDay, ViewMode } from './types';
 import {
   safeParseJSON,
@@ -18,6 +18,7 @@ import {
   STREAK_WEEKLY_BONUS,
   WEEKLY_EXCELLENCE_THRESHOLD,
   WEEKLY_EXCELLENCE_BONUS,
+  MAX_SMILEYS,
   getSchoolEndTime,
   getDailyDutyAssignments,
   reshuffleDailyDutyAssignments,
@@ -533,7 +534,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
   const handleTaskClick = (childId: string, taskId: string) => {
     // For young children (up to age 8) - read task aloud on click
     const clickedChild = CHILDREN.find(c => c.id === childId);
-    if (clickedChild && clickedChild.age <= 8) {
+    if (clickedChild && getChildAge(clickedChild) <= 8) {
       const task = (tasks[childId] || []).find(t => t.id === taskId);
       if (task) speakTask(task.title);
     }
@@ -586,7 +587,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     const today = new Date().toDateString();
     if (allEveningDone && celebrationShown[childId] !== today) {
       setTimeout(() => {
-        setSmileyCount(prev => ({ ...prev, [childId]: (prev[childId] || 0) + 1 }));
+        setSmileyCount(prev => ({ ...prev, [childId]: Math.min(MAX_SMILEYS, (prev[childId] || 0) + 1) }));
         setCelebrationChild(childId);
         setCelebrationShown(prev => ({ ...prev, [childId]: today }));
 
@@ -702,8 +703,8 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
 
   // --- GIFT REDEMPTION ---
   const redeemGift = (childId: string) => {
-    if ((smileyCount[childId] || 0) >= 10) {
-      setSmileyCount(prev => ({ ...prev, [childId]: prev[childId] - 10 }));
+    if ((smileyCount[childId] || 0) >= MAX_SMILEYS) {
+      setSmileyCount(prev => ({ ...prev, [childId]: prev[childId] - MAX_SMILEYS }));
       setGiftsRedeemed(prev => ({ ...prev, [childId]: (prev[childId] || 0) + 1 }));
     }
   };
@@ -1216,7 +1217,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                   <div className="flex items-center gap-1.5">
                     <span className="text-lg font-bold text-[#4A4540]">{activeChild.name}</span>
                   </div>
-                  <p className="text-xs text-[#8C8479]">{activeChildId === 'arava' || activeChildId === 'hoshen' ? 'בת' : 'בן'} {activeChild.age} | {getDayName()}</p>
+                  <p className="text-xs text-[#8C8479]">{activeChildId === 'arava' || activeChildId === 'hoshen' ? 'בת' : 'בן'} {getChildAge(activeChild)} | {getDayName()}</p>
                 </div>
               </div>
 
@@ -1327,27 +1328,27 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
               <div>
                 <div className="flex justify-between text-[10px] text-amber-700 mb-1 font-bold">
                   <span>התקדמות למתנה:</span>
-                  <span>{Math.min(smileyCount[activeChildId] || 0, 10)}/10</span>
+                  <span>{Math.min(smileyCount[activeChildId] || 0, MAX_SMILEYS)}/{MAX_SMILEYS}</span>
                 </div>
                 <div className="h-2.5 bg-amber-100 rounded-full overflow-hidden border border-amber-200">
                   <div 
                     className="h-full bg-amber-400 transition-all duration-500"
-                    style={{ width: `${Math.min(100, ((smileyCount[activeChildId] || 0) / 10) * 100)}%` }}
+                    style={{ width: `${Math.min(100, ((smileyCount[activeChildId] || 0) / MAX_SMILEYS) * 100)}%` }}
                   ></div>
                 </div>
               </div>
 
               {/* Smileys visual row */}
               <div className="flex flex-wrap gap-1 justify-center">
-                {Array.from({ length: Math.min(smileyCount[activeChildId] || 0, 10) }).map((_, i) => (
+                {Array.from({ length: Math.min(smileyCount[activeChildId] || 0, MAX_SMILEYS) }).map((_, i) => (
                   <span key={i} className="text-lg">😊</span>
                 ))}
-                {Array.from({ length: Math.max(0, 10 - (smileyCount[activeChildId] || 0)) }).map((_, i) => (
+                {Array.from({ length: Math.max(0, MAX_SMILEYS - (smileyCount[activeChildId] || 0)) }).map((_, i) => (
                   <span key={`empty-${i}`} className="text-lg opacity-20">😊</span>
                 ))}
               </div>
 
-              {(smileyCount[activeChildId] || 0) >= 10 && (
+              {(smileyCount[activeChildId] || 0) >= MAX_SMILEYS && (
                 <div className="bg-gradient-to-r from-pink-100 to-amber-100 p-2.5 rounded-xl border border-pink-200 text-center">
                   <span className="text-sm font-bold text-pink-700">🎁 מגיעה לך מתנה מאבא ואמא!</span>
                 </div>
@@ -1776,7 +1777,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-bold text-sm text-[#4A4540] truncate">{child.name}</h3>
                           <p className="text-[10px] text-[#8C8479]">
-                            {child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {child.age}
+                            {child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {getChildAge(child)}
                           </p>
                         </div>
                         <div className="text-center shrink-0">
@@ -2440,7 +2441,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                               <img src={child.photo} alt={child.name} className="w-8 h-8 rounded-full object-cover object-top border" style={{ borderColor: child.color }} />
                               <div>
                                 <h4 className="font-bold text-[#4A4540]">{child.name}</h4>
-                                <p className="text-[10px] text-[#8C8479]">{child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {child.age}</p>
+                                <p className="text-[10px] text-[#8C8479]">{child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {getChildAge(child)}</p>
                               </div>
                             </div>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -2718,8 +2719,9 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                           
                           <div className="flex gap-1 justify-center">
                             <button
-                              onClick={() => setSmileyCount(prev => ({ ...prev, [child.id]: (prev[child.id] || 0) + 1 }))}
-                              className="px-2 py-1 bg-green-100 hover:bg-green-200 text-green-800 rounded-lg text-[10px] font-bold"
+                              onClick={() => setSmileyCount(prev => ({ ...prev, [child.id]: Math.min(MAX_SMILEYS, (prev[child.id] || 0) + 1) }))}
+                              disabled={(smileyCount[child.id] || 0) >= MAX_SMILEYS}
+                              className="px-2 py-1 bg-green-100 hover:bg-green-200 text-green-800 rounded-lg text-[10px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               +1 😊
                             </button>
@@ -2731,7 +2733,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                             </button>
                           </div>
 
-                          {(smileyCount[child.id] || 0) >= 10 && (
+                          {(smileyCount[child.id] || 0) >= MAX_SMILEYS && (
                             <button
                               onClick={() => redeemGift(child.id)}
                               className="w-full py-1.5 bg-pink-500 hover:bg-pink-600 text-white rounded-xl text-[10px] font-bold transition-all animate-pulse"
@@ -3619,10 +3621,12 @@ function syncMashovToAppSheet() {
                   😊
                 </motion.span>
                 <div className="text-right">
-                  <span className="text-sm font-bold text-amber-800 block">קיבלת סמיילי! +1</span>
+                  <span className="text-sm font-bold text-amber-800 block">
+                    {(smileyCount[celebrationChild] || 0) >= MAX_SMILEYS ? 'צברת 10 סמיילים! 🎉' : 'קיבלת סמיילי! +1'}
+                  </span>
                   <span className="text-xs text-amber-600">
                     סה״כ: {smileyCount[celebrationChild] || 0} סמיילים
-                    {(smileyCount[celebrationChild] || 0) >= 10 && ' — 🎁 מגיעה לך מתנה!'}
+                    {(smileyCount[celebrationChild] || 0) >= MAX_SMILEYS && ' — 🎁 מגיעה לך מתנה!'}
                   </span>
                 </div>
               </div>
@@ -3870,3 +3874,4 @@ function syncMashovToAppSheet() {
     </div>
   );
 }
+
