@@ -1,5 +1,5 @@
 import type { Task, Child, TimeOfDay } from '../types';
-import { getLocalDateKey } from '../utils/date';
+import { getLocalDateKey, getAgeFromBirthdate, getChildAge } from '../utils/date';
 
 export function safeParseJSON<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
@@ -11,12 +11,20 @@ export function safeParseJSON<T>(raw: string | null, fallback: T): T {
 }
 
 // ================= DATA CONSTANTS =================
+// Ages are computed from each child's birthdate (getAgeFromBirthdate runs on
+// every app load), so they update automatically on birthdays - no manual edit.
+// The static `age` field stays in sync at load time for simple display reads;
+// any age-dependent LOGIC should use getChildAge(child) directly.
 export const CHILDREN: Child[] = [
-  { id: 'arava', name: 'ערבה', age: 13, gender: 'female', initial: 'ע', color: '#5D4037', avatarEmoji: '👧', photo: '/photos/arava.jpg' },
-  { id: 'hoshen', name: 'חושן', age: 10, gender: 'female', initial: 'ח', color: '#D35400', avatarEmoji: '👧', photo: '/photos/hoshen.jpg' },
-  { id: 'peer', name: 'פאר', age: 7, gender: 'male', initial: 'פ', color: '#6A7B42', avatarEmoji: '👦', photo: '/photos/peer.jpg' },
-  { id: 'rafael', name: 'רפאל', age: 5, gender: 'male', initial: 'ר', color: '#8A9A5B', avatarEmoji: '👦', photo: '/photos/rafael.jpg' },
+  { id: 'arava', name: 'ערבה', age: getAgeFromBirthdate('2013-04-09'), birthdate: '2013-04-09', gender: 'female', initial: 'ע', color: '#5D4037', avatarEmoji: '👧', photo: '/photos/arava.jpg' },
+  { id: 'hoshen', name: 'חושן', age: getAgeFromBirthdate('2015-09-25'), birthdate: '2015-09-25', gender: 'female', initial: 'ח', color: '#D35400', avatarEmoji: '👧', photo: '/photos/hoshen.jpg' },
+  { id: 'peer', name: 'פאר', age: getAgeFromBirthdate('2019-06-24'), birthdate: '2019-06-24', gender: 'male', initial: 'פ', color: '#6A7B42', avatarEmoji: '👦', photo: '/photos/peer.jpg' },
+  { id: 'rafael', name: 'רפאל', age: getAgeFromBirthdate('2021-07-12'), birthdate: '2021-07-12', gender: 'male', initial: 'ר', color: '#8A9A5B', avatarEmoji: '👦', photo: '/photos/rafael.jpg' },
 ];
+
+// Maximum smileys a child can hold - reaching the cap earns a gift, and no
+// further smileys accumulate until the gift is redeemed.
+export const MAX_SMILEYS = 10;
 
 // Screen time reward (in minutes) per child
 // NEW: Per-task points system - each mandatory task earns points, no need to complete ALL
@@ -300,7 +308,7 @@ function _seededRand(seed: number) {
 function _rollDutyAssignments(rand: () => number, duties: SharedDuty[]): Record<string, string> {
   const assignments: Record<string, string> = {};
   duties.forEach(duty => {
-    const eligible = CHILDREN.filter(c => c.age >= duty.minAge);
+    const eligible = CHILDREN.filter(c => getChildAge(c) >= duty.minAge);
     if (eligible.length > 0) {
       assignments[duty.id] = eligible[Math.floor(rand() * eligible.length)].id;
     }
@@ -357,7 +365,7 @@ export function previewDutyAssignments(isFriday: boolean): Record<string, string
 // Shared household tasks are NOT in these lists – they are added separately via getDailyDutyAssignments.
 export function getInitialTasksForChild(childId: string): Task[] {
   const child = CHILDREN.find(c => c.id === childId);
-  const age = child?.age || 7;
+  const age = child ? getChildAge(child) : 7;
 
   // === TODDLER (2-4) ===
   if (age <= 4) {
@@ -457,7 +465,7 @@ export function getInitialTasksForChild(childId: string): Task[] {
 // them getting the full list.
 export function getFridayTasksForChild(childId: string): Task[] {
   const child = CHILDREN.find(c => c.id === childId);
-  const age = child?.age || 7;
+  const age = child ? getChildAge(child) : 7;
 
   const morningTasks = getInitialTasksForChild(childId).filter(t => t.time === 'morning');
 
