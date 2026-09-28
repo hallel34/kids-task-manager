@@ -20,6 +20,10 @@ export interface Child {
   id: string;
   name: string;
   age: number;
+  birthdate?: string; // Local "yyyy-mm-dd" birthdate. When set, the effective age
+                      // is computed from it (see getChildAge in utils/date) instead
+                      // of relying on the static `age` field.
+
   gender?: 'male' | 'female';
   initial: string;
   color: string;
