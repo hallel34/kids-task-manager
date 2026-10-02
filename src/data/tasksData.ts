@@ -42,7 +42,8 @@ export interface PrizeItem {
   name: string;
   emoji: string;
   cost: number;
-  category: 'screen' | 'privilege' | 'treat' | 'family' | 'premium';
+  category: 'screen' | 'privilege' | 'treat' | 'family' | 'premium' | 'personal';
+  childIds?: string[];        // set = item belongs to a per-child shop (only those children see it)
   cooldownHours?: number;     // undefined/0 = no cooldown, always available once affordable
   requiresApproval?: boolean; // true = redeeming only creates a pending request; a parent
                                // must approve before points are deducted and the cooldown starts
@@ -76,6 +77,31 @@ export const PRIZE_STORE: PrizeItem[] = [
   { id: 'small_toy', name: 'צעצוע קטן לבחירה', emoji: '🛍️', cost: 200, category: 'premium', requiresApproval: true },
   { id: 'family_pizza', name: 'להזמין פיצה משפחתית', emoji: '🍕', cost: 180, category: 'premium', requiresApproval: true },
   { id: 'special_day_parent', name: 'יום מיוחד עם אבא או אמא', emoji: '🏆', cost: 300, category: 'premium', requiresApproval: true },
+  // Per-child shops (age and taste adapted). Physical items - a parent approves each.
+  { id: 'ribbons', name: 'אביזרי שיער יפים', emoji: '🎀', cost: 100, category: 'personal', childIds: ['arava'], requiresApproval: true },
+  { id: 'nails', name: 'לק ומדבקות לציפורניים', emoji: '💅', cost: 110, category: 'personal', childIds: ['arava'], requiresApproval: true },
+  { id: 'jewelry', name: 'תכשיט קטן לבחירה', emoji: '💍', cost: 200, category: 'personal', childIds: ['arava'], requiresApproval: true },
+  { id: 'bag', name: 'תיק או ארנק', emoji: '👜', cost: 280, category: 'personal', childIds: ['arava'], requiresApproval: true },
+  { id: 'shirt', name: 'חולצה לבחירה', emoji: '👚', cost: 300, category: 'personal', childIds: ['arava'], requiresApproval: true },
+  { id: 'mall', name: 'יציאה עם אמא לקפה וקניות', emoji: '☕', cost: 160, category: 'personal', childIds: ['arava'], requiresApproval: true },
+  { id: 'h_hair', name: 'גומיות וסיכות מיוחדות', emoji: '🎀', cost: 90, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
+  { id: 'h_beads', name: 'ערכת צמידי חרוזים', emoji: '📿', cost: 120, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
+  { id: 'h_notebook', name: 'מחברת ומדבקות חמודות', emoji: '🦄', cost: 100, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
+  { id: 'h_craft', name: 'ערכת יצירה', emoji: '🎨', cost: 150, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
+  { id: 'h_hat', name: 'כובע או צעיף לבחירה', emoji: '🧢', cost: 180, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
+  { id: 'h_dress', name: 'שמלה או חולצה לבחירה', emoji: '👗', cost: 280, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
+  { id: 'p_car', name: 'מכונית צעצוע', emoji: '🚗', cost: 100, category: 'personal', childIds: ['peer'], requiresApproval: true },
+  { id: 'p_cards', name: 'חבילת קלפי משחק', emoji: '🃏', cost: 100, category: 'personal', childIds: ['peer'], requiresApproval: true },
+  { id: 'p_lego', name: 'לגו קטן', emoji: '🧱', cost: 200, category: 'personal', childIds: ['peer'], requiresApproval: true },
+  { id: 'p_ball', name: 'כדורגל', emoji: '⚽', cost: 220, category: 'personal', childIds: ['peer'], requiresApproval: true },
+  { id: 'p_hero', name: 'חולצת גיבור על', emoji: '🦸', cost: 250, category: 'personal', childIds: ['peer'], requiresApproval: true },
+  { id: 'p_dad', name: 'יום מיוחד עם אבא', emoji: '🏆', cost: 300, category: 'personal', childIds: ['peer'], requiresApproval: true },
+  { id: 'r_bubbles', name: 'בועות סבון', emoji: '🫧', cost: 60, category: 'personal', childIds: ['rafael'], requiresApproval: true },
+  { id: 'r_stickers', name: 'מדבקות רכבים', emoji: '🚒', cost: 90, category: 'personal', childIds: ['rafael'], requiresApproval: true },
+  { id: 'r_dino', name: 'דינוזאור צעצוע', emoji: '🦖', cost: 120, category: 'personal', childIds: ['rafael'], requiresApproval: true },
+  { id: 'r_puzzle', name: 'פאזל', emoji: '🧩', cost: 150, category: 'personal', childIds: ['rafael'], requiresApproval: true },
+  { id: 'r_blocks', name: 'קוביות בנייה', emoji: '🧱', cost: 180, category: 'personal', childIds: ['rafael'], requiresApproval: true },
+  { id: 'r_shirt', name: 'חולצה עם רכב', emoji: '🚜', cost: 220, category: 'personal', childIds: ['rafael'], requiresApproval: true },
 ];
 
 // A finalized redemption. `cooldownUntil` (epoch ms) is only present if the
@@ -145,12 +171,12 @@ export function formatCooldownRemaining(ms: number): string {
 }
 
 export function getAvailablePrizes(childId: string, redeemedPrizes: Record<string, RedemptionRecord[]>, now: number = Date.now()): PrizeItem[] {
-  return PRIZE_STORE.filter((p) => !isPrizeOnCooldown(p, childId, redeemedPrizes, now));
+  return PRIZE_STORE.filter((p) => (!p.childIds || p.childIds.includes(childId)) && !isPrizeOnCooldown(p, childId, redeemedPrizes, now));
 }
 
 export function getPrizesOnCooldown(childId: string, redeemedPrizes: Record<string, RedemptionRecord[]>, now: number = Date.now()): (PrizeItem & { remainingMs: number })[] {
   return PRIZE_STORE
-    .filter((p) => isPrizeOnCooldown(p, childId, redeemedPrizes, now))
+    .filter((p) => (!p.childIds || p.childIds.includes(childId)) && isPrizeOnCooldown(p, childId, redeemedPrizes, now))
     .map((p) => ({ ...p, remainingMs: getPrizeCooldownRemainingMs(p, childId, redeemedPrizes, now) }))
     .sort((a, b) => a.remainingMs - b.remainingMs);
 }
