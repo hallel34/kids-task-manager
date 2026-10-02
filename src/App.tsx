@@ -2905,7 +2905,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
                     {!collapsedPanels['prizeStats'] && (() => {
                       const stats = computeRedemptionStats(redeemedPrizes);
                       const categoryNames: Record<string, string> = {
-                        screen: '📱 זמן מסך', privilege: '👑 פריבילגיות', treat: '🍬 פינוקים', family: '👨‍👩‍👧‍👦 פעילות משפחתית', premium: '💎 פרסי על',
+                        screen: '📱 זמן מסך', privilege: '👑 פריבילגיות', treat: '🍬 פינוקים', family: '👨‍👩‍👧‍👦 פעילות משפחתית', premium: '💎 פרסי על', personal: '⭐ חנות אישית',
                       };
                       return (
                         <div className="p-6 pt-0 space-y-4">
@@ -3713,13 +3713,15 @@ function syncMashovToAppSheet() {
               </div>
 
               {/* Prize categories */}
-              {(['screen', 'privilege', 'treat', 'family', 'premium'] as const).map(category => {
+              <p className="text-center text-[11px] font-bold text-purple-500">🏪 חנות כללית לכולם, ובסוף החנות האישית שלך ⭐</p>
+              {(['screen', 'privilege', 'treat', 'family', 'premium', 'personal'] as const).map(category => {
                 const categoryNames: Record<string, { name: string; emoji: string }> = {
                   screen: { name: 'זמן מסך', emoji: '📱' },
                   privilege: { name: 'פריבילגיות', emoji: '👑' },
                   treat: { name: 'פינוקים', emoji: '🍬' },
                   family: { name: 'פעילות משפחתית', emoji: '👨‍👩‍👧‍👦' },
                   premium: { name: 'פרסי על', emoji: '💎' },
+                  personal: { name: `החנות של ${activeChild.name}`, emoji: '⭐' },
                 };
                 const prizes = getAvailablePrizes(activeChildId, redeemedPrizes).filter(p => p.category === category);
                 if (prizes.length === 0) return null;
