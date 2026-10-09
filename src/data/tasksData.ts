@@ -550,7 +550,10 @@ export function buildTasksForDayType(
   const missions = getWeeklyMissionTasksFor(childId, dayOfWeek);
   const customKey = `${childId}_${isFriday ? 'friday' : 'regular'}`;
   const custom = customDayTasks[customKey] || [];
-  return [...base, ...shared, ...missions, ...custom];
+  // Mandatory end-of-day task for every child: pick tomorrow's breakfast
+  // (completed only via the picker in BreakfastPicker.tsx).
+  const breakfast: Task = { id: 'breakfast_choice', time: 'evening', title: 'בחירת ארוחת בוקר למחר', emoji: '🥣', completed: false, mandatory: true };
+  return [...base, ...shared, ...missions, ...custom, breakfast];
 }
 
 // Get tasks based on day of week
