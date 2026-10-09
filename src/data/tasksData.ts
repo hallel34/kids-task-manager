@@ -550,10 +550,11 @@ export function buildTasksForDayType(
   const missions = getWeeklyMissionTasksFor(childId, dayOfWeek);
   const customKey = `${childId}_${isFriday ? 'friday' : 'regular'}`;
   const custom = customDayTasks[customKey] || [];
-  // Mandatory end-of-day task for every child: pick tomorrow's breakfast
-  // (completed only via the picker in BreakfastPicker.tsx).
+  // Mandatory end-of-day task for every child: pick tomorrow's breakfast.
+  // Skip Friday evenings because the family does not use the tablet then.
+  // Saturday evening still picks Sunday breakfast (and Arava's lunch).
   const breakfast: Task = { id: 'breakfast_choice', time: 'evening', title: 'בחירת ארוחת בוקר למחר', emoji: '🥣', completed: false, mandatory: true };
-  return [...base, ...shared, ...missions, ...custom, breakfast];
+  return [...base, ...shared, ...missions, ...custom, ...(isFriday ? [] : [breakfast])];
 }
 
 // Get tasks based on day of week
