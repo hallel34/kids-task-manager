@@ -4,6 +4,7 @@ import { useCloudSync } from './hooks/useCloudSync';
 import { useRewardsSync } from './hooks/useRewardsSync';
 import { useFindDevice } from './hooks/useFindDevice';
 import { EmojiConfettiBurst } from './components/EmojiConfettiBurst';
+import { BreakfastPicker } from './components/BreakfastPicker';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
 import { getLocalDateKey, getChildAge } from './utils/date';
 import type { Task, Child, TimeOfDay, ViewMode } from './types';
@@ -120,6 +121,7 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
 
   // --- CAMERA OVERLAY & LIGHTBOX STATE ---
   const [captureTaskTarget, setCaptureTaskTarget] = useState<{ childId: string; taskId: string } | null>(null);
+  const [breakfastTarget, setBreakfastTarget] = useState<string | null>(null);
   const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
 
   // Time of day override (null = auto by clock)
@@ -604,11 +606,17 @@ export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
     }
   };
 
-  const toggleTask = (childId: string, taskId: string) => {
+  const toggleTask = (childId: string, taskId: string, bypassBreakfast = false) => {
     const list = tasks[childId] || [];
     const task = list.find((t) => t.id === taskId);
 
     if (task) {
+      // Breakfast task cannot be ticked directly: it opens the picker, which
+      // completes it only after veg + fruit + bread + spread are chosen.
+      if (task.id === 'breakfast_choice' && !task.completed && !bypassBreakfast) {
+        setBreakfastTarget(childId);
+        return;
+      }
       if (task.requiresPhoto && !task.completed && !task.photo) {
         setCaptureTaskTarget({ childId, taskId });
         return;
@@ -3850,6 +3858,15 @@ function syncMashovToAppSheet() {
           </div>
         )}
       </AnimatePresence>
+
+      {breakfastTarget && (
+        <BreakfastPicker
+          childId={breakfastTarget}
+          familyCode={familyCode}
+          onClose={() => setBreakfastTarget(null)}
+          onDone={() => { const id = breakfastTarget; setBreakfastTarget(null); toggleTask(id, 'breakfast_choice', true); }}
+        />
+      )}
 
       {/* Prize redemption success popup */}
       <AnimatePresence>
