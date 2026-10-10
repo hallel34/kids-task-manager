@@ -16,13 +16,13 @@ const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמיש
 const pad = (n: number) => String(n).padStart(2, '0');
 const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-const VEG = ['🥒 מלפפון', '🍅 עגבנייה', '🥕 גזר', '🫑 פלפל', '🥬 חסה', '🥦 ברוקולי'];
+const VEG = ['🥒 מלפפון', '🍅 עגבנייה', '🥕 גזר', '🫑 פלפל', '🥬 חסה', '🥦 ברוקולי', '🥗 סלט ירקות'];
 const FRUIT = ['🍎 תפוח', '🍌 בננה', '🍇 ענבים', '🍊 תפוז', '🍓 תות', '🥝 קיווי', '🍐 אגס'];
-const BREAD = ['🌾 פיתה מקמח מלא 💚', '🫓 פיתה רגילה', '🍞 לחם מלא 💚'];
-const SPREAD = ['🥑 אבוקדו 💚', '🧀 גבינה לבנה 💚', '🫒 טחינה 💚', '🧆 חומוס 💚', '🥚 ביצה קשה 💚', '🥜 חמאת בוטנים', '🧈 גבינת שמנת', '🍯 דבש', '🍫 שוקולד'];
+const BREAD = ['🌾 פיתה מקמח מלא 💚', '🫓 פיתה רגילה', '🍞 לחם מלא 💚', '🥪 טוסט'];
+const SPREAD = ['🥑 אבוקדו 💚', '🧀 גבינה לבנה 💚', '🫒 טחינה 💚', '🧆 חומוס 💚', '🥚 ביצה קשה 💚', '🍳 חביתה', '🥜 חמאת בוטנים', '🧈 גבינת שמנת', '🍯 דבש', '🍫 שוקולד'];
 const LUNCH = ['🍝 פסטה', '🍚 אורז עם עוף', '🍗 שניצל עם ירקות', '🍳 חביתה וסלט', '🥙 פיתה עם חומוס וסלט', '🍲 מרק'];
 
-type Pick = { veg: string; fruit: string; bread: string; spread: string; lunch?: string; at: number };
+type Pick = { veg: string; fruit: string; bread: string; spread: string; lunch?: string; specialRequest?: string; at: number };
 
 async function loadDay(code: string, dateKey: string): Promise<Record<string, Pick>> {
   try {
@@ -41,13 +41,13 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
   const needsLunch = childId === 'arava' && tomorrow.getDay() === 0;
   const [veg, setVeg] = useState(''); const [fruit, setFruit] = useState('');
   const [bread, setBread] = useState(''); const [spread, setSpread] = useState('');
-  const [lunch, setLunch] = useState('');
+  const [lunch, setLunch] = useState(''); const [specialRequest, setSpecialRequest] = useState('');
   const [err, setErr] = useState(''); const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadDay(familyCode, dateKey).then(d => {
       const p = d[childId]; if (!p) return;
-      setVeg(p.veg || ''); setFruit(p.fruit || ''); setBread(p.bread || ''); setSpread(p.spread || ''); setLunch(p.lunch || '');
+      setVeg(p.veg || ''); setFruit(p.fruit || ''); setBread(p.bread || ''); setSpread(p.spread || ''); setLunch(p.lunch || ''); setSpecialRequest(p.specialRequest || '');
     });
   }, []);
 
@@ -58,7 +58,7 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
     setSaving(true); setErr('');
     try {
       const fresh = await loadDay(familyCode, dateKey);
-      const entry: Pick = { veg, fruit, bread, spread, at: Date.now() };
+      const entry: Pick = { veg, fruit, bread, spread, specialRequest, at: Date.now() };
       if (needsLunch && lunch) entry.lunch = lunch;
       fresh[childId] = entry;
       const r = await fetch(docUrl(familyCode, 'breakfast-' + dateKey), {
@@ -97,6 +97,12 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
         {group('🫓 סוג לחם', BREAD, bread, setBread)}
         {group('🧈 סוג ממרח', SPREAD, spread, setSpread)}
         {needsLunch && group('🍽️ ארוחת צהריים ליום ראשון', LUNCH, lunch, setLunch)}
+        <div>
+          <label htmlFor="breakfast-special-request" className="block font-bold text-[#5D4037] mb-1.5">משהו מיוחד</label>
+          <textarea id="breakfast-special-request" value={specialRequest} onChange={e => setSpecialRequest(e.target.value)}
+            rows={2} className="w-full rounded-xl border border-[#D6CFC4] bg-white px-3 py-2 text-sm text-[#5D4037]"
+            placeholder="בקשה מיוחדת (לא חובה)" />
+        </div>
         {err && <p className="text-sm text-red-600">{err}</p>}
         <button onClick={save} disabled={!complete || saving}
           className={`w-full py-3 rounded-2xl font-bold text-white ${complete && !saving ? 'bg-[#6A7B42]' : 'bg-gray-300'}`}>
