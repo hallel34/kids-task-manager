@@ -3,6 +3,24 @@ import { saveTasksToCloud, loadTasksFromCloud } from '../cloudStorage';
 import { getLocalDateKey } from '../utils/date';
 import type { Task } from '../types';
 
+// Apply the breakfast feature to existing local/cloud snapshots without
+// rebuilding the day or losing completed tasks, photos or parent edits.
+function reconcileBreakfastTasks(snapshot: Record<string, Task[]>, dayOfWeek = new Date().getDay()): Record<string, Task[]> {
+  let changed = false;
+  const next = { ...snapshot };
+  for (const [childId, list] of Object.entries(snapshot)) {
+    const hasBreakfast = list.some(task => task.id === 'breakfast_choice');
+    if (dayOfWeek === 5 && hasBreakfast) {
+      next[childId] = list.filter(task => task.id !== 'breakfast_choice');
+      changed = true;
+    } else if (dayOfWeek !== 5 && !hasBreakfast) {
+      next[childId] = [...list, { id: 'breakfast_choice', time: 'evening', title: 'בחירת ארוחת בוקר למחר', emoji: '🥣', completed: false, mandatory: true }];
+      changed = true;
+    }
+  }
+  return changed ? next : snapshot;
+}
+
 function generateFamilyCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
@@ -45,6 +63,13 @@ export function useCloudSync(tasks: Record<string, Task[]>, setTasks: Dispatch<S
     if (!enabled) setSyncStatus('idle');
   };
 
+  // Migrate both local saved lists and snapshots received from older devices.
+  // Preserve every existing task object; never reset the day's progress.
+  useEffect(() => {
+    const reconciled = reconcileBreakfastTasks(tasks);
+    if (reconciled !== tasks) setTasks(reconciled);
+  }, [tasks, setTasks]);
+
   // Debounced save whenever tasks change
   useEffect(() => {
     if (!syncEnabled || !familyCode) return;
@@ -78,7 +103,7 @@ export function useCloudSync(tasks: Record<string, Task[]>, setTasks: Dispatch<S
         const result = await loadTasksFromCloud(familyCode, getLocalDateKey());
         if (result && result.updatedAt > knownUpdatedAt.current) {
           knownUpdatedAt.current = result.updatedAt;
-          setTasks(result.tasks as Record<string, Task[]>);
+          setTasks(reconcileBreakfastTasks(result.tasks as Record<string, Task[]>));
           setSyncStatus('ok');
           setTimeout(() => setSyncStatus('idle'), 2000);
         }
