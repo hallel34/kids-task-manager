@@ -4,7 +4,7 @@ import { CHILDREN } from '../data/tasksData';
 
 // Breakfast pick for tomorrow. Opened from the mandatory evening task
 // "breakfast_choice"; the task can only be completed through onDone, which
-// fires only after one vegetable, one fruit, a bread type and a spread type
+// fires only after one vegetable, one fruit, a bread type and at least one spread
 // were chosen and saved. Choices are stored in the existing family-code
 // Firestore sync as dailyTasks/breakfast-YYYY-MM-DD (same doc shape the
 // rules already allow), so the evening parent summary can read them.
@@ -22,7 +22,7 @@ const BREAD = ['🌾 פיתה מקמח מלא 💚', '🫓 פיתה רגילה',
 const SPREAD = ['🥑 אבוקדו 💚', '🧀 גבינה לבנה 💚', '🫒 טחינה 💚', '🧆 חומוס 💚', '🥚 ביצה קשה 💚', '🍳 חביתה', '🥜 חמאת בוטנים', '🧈 גבינת שמנת', '🍯 דבש', '🍫 שוקולד'];
 const LUNCH = ['🍝 פסטה', '🍚 אורז עם עוף', '🍗 שניצל עם ירקות', '🍳 חביתה וסלט', '🥙 פיתה עם חומוס וסלט', '🍲 מרק'];
 
-type Pick = { veg: string; fruit: string; bread: string; spread: string; lunch?: string; specialRequest?: string; at: number };
+type Pick = { veg: string; fruit: string; bread: string; spreads?: string[]; spread?: string; lunch?: string; specialRequest?: string; at: number };
 
 async function loadDay(code: string, dateKey: string): Promise<Record<string, Pick>> {
   try {
@@ -40,25 +40,28 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
   const dayName = DAY_NAMES[tomorrow.getDay()];
   const needsLunch = childId === 'arava' && tomorrow.getDay() === 0;
   const [veg, setVeg] = useState(''); const [fruit, setFruit] = useState('');
-  const [bread, setBread] = useState(''); const [spread, setSpread] = useState('');
+  const [bread, setBread] = useState(''); const [spreads, setSpreads] = useState<string[]>([]);
   const [lunch, setLunch] = useState(''); const [specialRequest, setSpecialRequest] = useState('');
   const [err, setErr] = useState(''); const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadDay(familyCode, dateKey).then(d => {
       const p = d[childId]; if (!p) return;
-      setVeg(p.veg || ''); setFruit(p.fruit || ''); setBread(p.bread || ''); setSpread(p.spread || ''); setLunch(p.lunch || ''); setSpecialRequest(p.specialRequest || '');
+      setVeg(p.veg || ''); setFruit(p.fruit || ''); setBread(p.bread || '');
+      // Older entries stored one string in `spread`; continue displaying them.
+      setSpreads(Array.isArray(p.spreads) ? p.spreads : (p.spread ? [p.spread] : []));
+      setLunch(p.lunch || ''); setSpecialRequest(p.specialRequest || '');
     });
   }, []);
 
-  const complete = !!(veg && fruit && bread && spread);
+  const complete = !!(veg && fruit && bread && spreads.length > 0);
 
   const save = async () => {
     if (!complete) return;
     setSaving(true); setErr('');
     try {
       const fresh = await loadDay(familyCode, dateKey);
-      const entry: Pick = { veg, fruit, bread, spread, specialRequest, at: Date.now() };
+      const entry: Pick = { veg, fruit, bread, spreads, specialRequest, at: Date.now() };
       if (needsLunch && lunch) entry.lunch = lunch;
       fresh[childId] = entry;
       const r = await fetch(docUrl(familyCode, 'breakfast-' + dateKey), {
@@ -82,20 +85,35 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
     </div>
   );
 
+  const spreadGroup = (
+    <div>
+      <h4 className="font-bold text-[#5D4037] mb-1.5">🧈 סוג ממרח {spreads.length ? '✓' : ''}</h4>
+      <div className="flex gap-1.5 flex-wrap">
+        {SPREAD.map(i => {
+          const selected = spreads.includes(i);
+          return (
+            <button key={i} onClick={() => setSpreads(selected ? spreads.filter(s => s !== i) : [...spreads, i])}
+              className={`px-3 py-2 rounded-xl text-sm font-bold border ${selected ? 'bg-[#6A7B42] text-white border-[#6A7B42]' : 'bg-white text-[#5D4037] border-[#D6CFC4]'}`}>{i}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 bg-black/50 z-[80] flex items-center justify-center p-3" dir="rtl">
       <div className="bg-[#FDFBF7] rounded-3xl border border-[#D6CFC4] shadow-2xl p-5 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-4">
         <div className="flex items-start justify-between">
           <div>
             <h3 className="text-xl font-bold text-[#5D4037]">🥣 ארוחת הבוקר של {child?.name} ליום {dayName}</h3>
-            <p className="text-xs text-[#8C8479]">חובה לבחור אחד מכל סוג. 💚 = בחירה בריאה במיוחד</p>
+            <p className="text-xs text-[#8C8479]">חובה לבחור ירק, פרי, לחם ולפחות ממרח אחד. 💚 = בחירה בריאה במיוחד</p>
           </div>
           <button onClick={onClose} className="text-[#8C8479] text-xl px-2">✕</button>
         </div>
         {group('🥕 ירק (אחד)', VEG, veg, setVeg)}
         {group('🍎 פרי (אחד)', FRUIT, fruit, setFruit)}
         {group('🫓 סוג לחם', BREAD, bread, setBread)}
-        {group('🧈 סוג ממרח', SPREAD, spread, setSpread)}
+        {spreadGroup}
         {needsLunch && group('🍽️ ארוחת צהריים ליום ראשון', LUNCH, lunch, setLunch)}
         <div>
           <label htmlFor="breakfast-special-request" className="block font-bold text-[#5D4037] mb-1.5">משהו מיוחד</label>
