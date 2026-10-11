@@ -19,10 +19,10 @@ const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.
 const VEG = ['🥒 מלפפון', '🍅 עגבנייה', '🥕 גזר', '🫑 פלפל', '🥬 חסה', '🥦 ברוקולי', '🥗 סלט ירקות'];
 // Seasonal fruit (Israel), by month of the day the breakfast is for.
 const FRUIT_BY_SEASON: Record<string, string[]> = {
-  winter: ['🍊 תפוז', '🍊 קלמנטינה', '🍊 אשכולית', '🥝 קיווי', '🍎 תפוח', '🍌 בננה'],
-  spring: ['🍓 תות', '🍒 דובדבן', '🍑 משמש', '🍊 תפוז', '🍌 בננה', '🍎 תפוח'],
-  summer: ['🍉 אבטיח', '🍈 מלון', '🍑 אפרסק', '🍑 נקטרינה', '🍇 ענבים', '🍌 בננה'],
-  autumn: ['🍎 תפוח', '🍐 אגס', '🍇 ענבים', '🍈 אפרסמון', '🍎 רימון', '🍌 בננה'],
+  winter: ['🍌 בננה', '🍎 תפוח', '🍐 אגס', '🥝 קיווי', '🍇 ענבים'],
+  spring: ['🍌 בננה', '🍎 תפוח', '🍐 אגס', '🥝 קיווי', '🍇 ענבים'],
+  summer: ['🍌 בננה', '🍎 תפוח', '🍐 אגס', '🥝 קיווי', '🍇 ענבים'],
+  autumn: ['🍌 בננה', '🍎 תפוח', '🍐 אגס', '🥝 קיווי', '🍇 ענבים'],
 };
 const SEASON_LABEL: Record<string, string> = { winter: 'חורף', spring: 'אביב', summer: 'קיץ', autumn: 'סתיו' };
 const seasonOf = (d: Date) => { const m = d.getMonth() + 1; return m === 12 || m <= 2 ? 'winter' : m <= 5 ? 'spring' : m <= 8 ? 'summer' : 'autumn'; };
