@@ -17,10 +17,32 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 const VEG = ['🥒 מלפפון', '🍅 עגבנייה', '🥕 גזר', '🫑 פלפל', '🥬 חסה', '🥦 ברוקולי', '🥗 סלט ירקות'];
-const FRUIT = ['🍎 תפוח', '🍌 בננה', '🍇 ענבים', '🍊 תפוז', '🍓 תות', '🥝 קיווי', '🍐 אגס'];
+// Seasonal fruit (Israel), by month of the day the breakfast is for.
+const FRUIT_BY_SEASON: Record<string, string[]> = {
+  winter: ['🍊 תפוז', '🍊 קלמנטינה', '🍊 אשכולית', '🥝 קיווי', '🍎 תפוח', '🍌 בננה'],
+  spring: ['🍓 תות', '🍒 דובדבן', '🍑 משמש', '🍊 תפוז', '🍌 בננה', '🍎 תפוח'],
+  summer: ['🍉 אבטיח', '🍈 מלון', '🍑 אפרסק', '🍑 נקטרינה', '🍇 ענבים', '🍌 בננה'],
+  autumn: ['🍎 תפוח', '🍐 אגס', '🍇 ענבים', '🍈 אפרסמון', '🍎 רימון', '🍌 בננה'],
+};
+const SEASON_LABEL: Record<string, string> = { winter: 'חורף', spring: 'אביב', summer: 'קיץ', autumn: 'סתיו' };
+const seasonOf = (d: Date) => { const m = d.getMonth() + 1; return m === 12 || m <= 2 ? 'winter' : m <= 5 ? 'spring' : m <= 8 ? 'summer' : 'autumn'; };
 const BREAD = ['🌾 פיתה מקמח מלא 💚', '🫓 פיתה רגילה', '🍞 לחם מלא 💚', '🥪 טוסט'];
 const SPREAD = ['🥑 אבוקדו 💚', '🧀 גבינה לבנה 💚', '🫒 טחינה 💚', '🧆 חומוס 💚', '🥚 ביצה קשה 💚', '🍳 חביתה', '🥜 חמאת בוטנים', '🧈 גבינת שמנת', '🍯 דבש', '🍫 שוקולד'];
 const LUNCH = ['🍝 פסטה', '🍚 אורז עם עוף', '🍗 שניצל עם ירקות', '🍳 חביתה וסלט', '🥙 פיתה עם חומוס וסלט', '🍲 מרק'];
+
+// Missing-items reports. Doc families/{code}/dailyTasks/missing-YYYY-MM-DD (date of report),
+// field tasks = JSON string {"items":[{id,kind:'fruit'|'veg'|'other',name,childId,childName,at,notified:false,notifiedAt:null}]}.
+// A watcher sends WhatsApp for items with notified===false, then PATCHes them to notified:true + notifiedAt.
+type Missing = { id: string; kind: 'fruit' | 'veg' | 'other'; name: string; childId: string; childName: string; at: number; notified: boolean; notifiedAt: number | null };
+async function loadMissing(code: string, dateKey: string): Promise<{ items: Missing[] }> {
+  try {
+    const r = await fetch(docUrl(code, 'missing-' + dateKey));
+    if (!r.ok) return { items: [] };
+    const d = await r.json();
+    const o = JSON.parse(d?.fields?.tasks?.stringValue || '{}');
+    return { ...o, items: Array.isArray(o.items) ? o.items : [] };
+  } catch { return { items: [] }; }
+}
 
 type Pick = { veg: string; fruit: string; bread: string; spreads?: string[]; spread?: string; lunch?: string; specialRequest?: string; at: number };
 
@@ -42,6 +64,10 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
   const [veg, setVeg] = useState(''); const [fruit, setFruit] = useState('');
   const [bread, setBread] = useState(''); const [spreads, setSpreads] = useState<string[]>([]);
   const [lunch, setLunch] = useState(''); const [specialRequest, setSpecialRequest] = useState('');
+  const FRUIT = (() => { const base = FRUIT_BY_SEASON[seasonOf(tomorrow)]; return fruit && !base.includes(fruit) ? [...base, fruit] : base; })();
+  const MISSING_VEG = VEG.filter(v => !v.includes('סלט'));
+  const [missOpen, setMissOpen] = useState(false); const [missSel, setMissSel] = useState<string[]>([]);
+  const [missOther, setMissOther] = useState(''); const [missMsg, setMissMsg] = useState(''); const [missSaving, setMissSaving] = useState(false);
   const [err, setErr] = useState(''); const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -71,6 +97,30 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
       if (!r.ok) throw new Error('save');
       onDone();
     } catch { setErr('לא הצלחנו לשמור, נסו שוב'); setSaving(false); }
+  };
+
+  const reportMissing = async () => {
+    const todayKey = keyOf(new Date());
+    const names: { kind: Missing['kind']; name: string }[] = [
+      ...missSel.map(n => ({ kind: (FRUIT_BY_SEASON[seasonOf(tomorrow)].includes(n) ? 'fruit' : 'veg') as Missing['kind'], name: n })),
+      ...(missOther.trim() ? [{ kind: 'other' as const, name: missOther.trim() }] : []),
+    ];
+    if (!names.length) return;
+    setMissSaving(true); setMissMsg('');
+    try {
+      const doc = await loadMissing(familyCode, todayKey);
+      names.forEach(({ kind, name }, i) => {
+        const exists = doc.items.some(m => !m.notified && m.kind === kind && m.name === name);
+        if (!exists) doc.items.push({ id: `${Date.now()}-${childId}-${i}`, kind, name, childId, childName: child?.name || childId, at: Date.now(), notified: false, notifiedAt: null });
+      });
+      const r = await fetch(docUrl(familyCode, 'missing-' + todayKey), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { tasks: { stringValue: JSON.stringify(doc) }, updatedAt: { integerValue: String(Date.now()) } } }),
+      });
+      if (!r.ok) throw new Error('save');
+      setMissSel([]); setMissOther(''); setMissMsg('נשלח להורים ✓');
+    } catch { setMissMsg('לא הצלחנו לשלוח, נסו שוב'); }
+    setMissSaving(false);
   };
 
   const group = (title: string, items: string[], val: string, set: (v: string) => void) => (
@@ -120,6 +170,26 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
           <textarea id="breakfast-special-request" value={specialRequest} onChange={e => setSpecialRequest(e.target.value)}
             rows={2} className="w-full rounded-xl border border-[#D6CFC4] bg-white px-3 py-2 text-sm text-[#5D4037]"
             placeholder="בקשה מיוחדת (לא חובה)" />
+        </div>
+        <div className="border-t border-[#D6CFC4] pt-3">
+          <button onClick={() => setMissOpen(!missOpen)} className="w-full text-right font-bold text-[#5D4037]">🛒 חסרים פירות או ירקות בבית? {missOpen ? '▲' : '▼'}</button>
+          {missOpen && (
+            <div className="mt-2 space-y-2">
+              <p className="text-xs text-[#8C8479]">פירות העונה ({SEASON_LABEL[seasonOf(tomorrow)]}) וירקות. סמנו מה חסר וההורים יקבלו הודעה.</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {[...FRUIT_BY_SEASON[seasonOf(tomorrow)], ...MISSING_VEG].map(i => {
+                  const sel = missSel.includes(i);
+                  return <button key={i} onClick={() => setMissSel(sel ? missSel.filter(x => x !== i) : [...missSel, i])}
+                    className={`px-3 py-2 rounded-xl text-sm font-bold border ${sel ? 'bg-[#B5651D] text-white border-[#B5651D]' : 'bg-white text-[#5D4037] border-[#D6CFC4]'}`}>{i}</button>;
+                })}
+              </div>
+              <input value={missOther} onChange={e => setMissOther(e.target.value)} placeholder="משהו אחר שחסר (לא חובה)"
+                className="w-full rounded-xl border border-[#D6CFC4] bg-white px-3 py-2 text-sm text-[#5D4037]" />
+              <button onClick={reportMissing} disabled={missSaving || (!missSel.length && !missOther.trim())}
+                className={`w-full py-2 rounded-2xl font-bold text-white ${!missSaving && (missSel.length || missOther.trim()) ? 'bg-[#B5651D]' : 'bg-gray-300'}`}>{missSaving ? 'שולח...' : 'דווחו שחסר'}</button>
+              {missMsg && <p className="text-sm text-[#5D4037]">{missMsg}</p>}
+            </div>
+          )}
         </div>
         {err && <p className="text-sm text-red-600">{err}</p>}
         <button onClick={save} disabled={!complete || saving}
