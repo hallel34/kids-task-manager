@@ -1,3 +1,4 @@
+import { loadShopping, changeShopping, addShoppingItem } from '../shoppingList';
 // Server-side monitor API for the missing fruit/veg reports (דיווחו שחסר).
 // The kids' app stores reports in Firestore doc
 // families/{code}/dailyTasks/missing-YYYY-MM-DD, field tasks = JSON string
@@ -87,6 +88,7 @@ export default async function handler(req: any, res: any) {
         count: doc.items.length,
         items: doc.items,
         unnotified: doc.items.filter(m => !m.notified),
+        shoppingList: (await loadShopping(docUrl(code, 'shopping-current'))).doc.items,
       });
       return;
     }
@@ -94,6 +96,15 @@ export default async function handler(req: any, res: any) {
     if (req.method === 'POST') {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
       const action = body.action || 'add';
+      if (action === 'addToShoppingList') {
+        const name = String(body.name || '').trim();
+        if (!name || name.length > 120) { res.status(400).json({ ok: false, error: 'name must contain 1-120 characters' }); return; }
+        const kind = body.kind === 'fruit' || body.kind === 'veg' ? body.kind : 'other';
+        const source = body.source === 'manual' ? 'manual' : 'missing-report';
+        const shopping = await changeShopping(docUrl(code, 'shopping-current'), doc => addShoppingItem(doc, name, kind, source));
+        res.status(200).json({ ok: true, shoppingList: shopping.items });
+        return;
+      }
       const { doc } = await loadMissing(code, dateKey);
 
       if (action === 'add') {
@@ -126,7 +137,7 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      res.status(400).json({ ok: false, error: 'unknown action (use add or markNotified)' });
+      res.status(400).json({ ok: false, error: 'unknown action (use add, markNotified or addToShoppingList)' });
       return;
     }
 
