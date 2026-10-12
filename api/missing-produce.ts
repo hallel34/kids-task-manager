@@ -1,7 +1,7 @@
 // Shared REST storage for the app and the protected monitor. A separate
 // dailyTasks document uses the existing family-code capability rules.
 // updateTime preconditions prevent concurrent devices from losing changes.
-type ShoppingItem = { id: string; name: string; kind: 'fruit' | 'veg' | 'other'; source: 'missing-report' | 'manual'; addedAt: number; bought: boolean; boughtAt: number | null };
+type ShoppingItem = { id: string; name: string; kind: 'fruit' | 'veg' | 'other'; source: 'missing-report' | 'manual'; addedAt: number; bought: boolean; boughtAt: number | null; notified?: boolean; notifiedAt?: number | null };
 type ShoppingDoc = { items: ShoppingItem[] };
 async function loadShopping(url: string): Promise<{ doc: ShoppingDoc; version?: string }> {
   const r = await fetch(url, { cache: 'no-store' });
@@ -67,6 +67,16 @@ function docUrl(code: string, key: string): string {
 type Missing = { id: string; kind: 'fruit' | 'veg' | 'other'; name: string; childId: string; childName: string; at: number; notified: boolean; notifiedAt: number | null };
 type MissingDoc = { items: Missing[] };
 
+// Enable alerts for new manual additions only, without replaying the old list.
+const MANUAL_ALERTS_FROM = 1791806863567;
+const SHOPPING_ID_PREFIX = 'shopping:';
+function manualReports(items: ShoppingItem[]): Missing[] {
+  return items.filter(i => i.source === 'manual' && i.addedAt >= MANUAL_ALERTS_FROM && !i.bought && !i.notified)
+    .map(i => ({ id: SHOPPING_ID_PREFIX + i.id, kind: i.kind, name: i.name,
+      childId: 'manual-shopping', childName: 'נוסף ידנית לרשימת הקניות',
+      at: i.addedAt, notified: false, notifiedAt: null }));
+}
+
 async function loadMissing(code: string, dateKey: string): Promise<{ doc: MissingDoc; exists: boolean }> {
   const r = await fetch(docUrl(code, 'missing-' + dateKey));
   if (r.status === 404) return { doc: { items: [] }, exists: false };
@@ -116,15 +126,20 @@ export default async function handler(req: any, res: any) {
   try {
     if (req.method === 'GET') {
       const { doc, exists } = await loadMissing(code, dateKey);
+      const shopping = (await loadShopping(docUrl(code, 'shopping-current'))).doc.items;
+      const manual = manualReports(shopping);
+      const items = [...doc.items, ...manual];
       res.status(200).json({
         ok: true,
         familyCode: code,
         date: dateKey,
         docExists: exists,
-        count: doc.items.length,
-        items: doc.items,
-        unnotified: doc.items.filter(m => !m.notified),
-        shoppingList: (await loadShopping(docUrl(code, 'shopping-current'))).doc.items,
+        count: items.length,
+        items,
+        unnotified: items.filter(m => !m.notified),
+        unnotifiedShopping: manual,
+        manualAlertsFrom: MANUAL_ALERTS_FROM,
+        shoppingList: shopping,
       });
       return;
     }
@@ -167,8 +182,20 @@ export default async function handler(req: any, res: any) {
         if (!ids.length) { res.status(400).json({ ok: false, error: 'ids[] is required' }); return; }
         const now = Date.now();
         let marked = 0;
+        const shoppingIds = ids.filter(id => id.startsWith(SHOPPING_ID_PREFIX)).map(id => id.slice(SHOPPING_ID_PREFIX.length));
+        if (shoppingIds.length) {
+          await changeShopping(docUrl(code, 'shopping-current'), shopping => {
+            // Recalculate on retry, preserving concurrent shopping-list edits.
+            marked = 0;
+            shopping.items.forEach(i => {
+              if (shoppingIds.includes(i.id) && i.source === 'manual' && !i.notified) {
+                i.notified = true; i.notifiedAt = now; marked++;
+              }
+            });
+          });
+        }
         doc.items.forEach(m => { if (ids.includes(m.id) && !m.notified) { m.notified = true; m.notifiedAt = now; marked++; } });
-        await saveMissing(code, dateKey, doc);
+        if (ids.some(id => !id.startsWith(SHOPPING_ID_PREFIX))) await saveMissing(code, dateKey, doc);
         res.status(200).json({ ok: true, date: dateKey, marked, count: doc.items.length, items: doc.items });
         return;
       }
