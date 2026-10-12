@@ -4,8 +4,8 @@
 // {"items":[{id,kind:'fruit'|'veg'|'other',name,childId,childName,at,notified,notifiedAt}]}.
 // This route lets the monitor agent read that state (GET) and add an item to
 // the shopping list / mark items notified (POST) without exposing writes to
-// the public app. Protected by the MONITOR_TOKEN env var: pass ?token=... or
-// Authorization: Bearer <token>. Not linked from the public app.
+// the public app. Protected by the MONITOR_TOKEN env var: Authorization: Bearer <token>
+// only (no query-string token). Not linked from the public app.
 
 const FIREBASE_API_KEY = 'AIzaSyBN4NhRe0bgOB80_MWszPNDlTMZMrzPqPo';
 const FIREBASE_PROJECT_ID = 'kids-task-manager-fe682';
@@ -57,11 +57,10 @@ async function saveMissing(code: string, dateKey: string, doc: MissingDoc): Prom
 function authorized(req: any): boolean {
   const expected = process.env.MONITOR_TOKEN;
   if (!expected) return false;
-  const q = (req.query?.token as string) || '';
+  // Authorization: Bearer only - no ?token= query param (it lands in access logs).
   const h = (req.headers?.authorization as string) || '';
   const bearer = h.startsWith('Bearer ') ? h.slice(7) : '';
-  const given = q || bearer;
-  return given.length > 0 && given === expected;
+  return bearer.length > 0 && bearer === expected;
 }
 
 export default async function handler(req: any, res: any) {
