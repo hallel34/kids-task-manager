@@ -4,7 +4,9 @@ import { X } from 'lucide-react';
 import App from './src/App';
 import { FIREBASE_API_KEY, FIREBASE_PROJECT_ID } from './src/firebase';
 import { loadShopping, changeShopping, addShoppingItem, type ShoppingItem, type ShoppingDoc } from './shoppingList';
-function ShoppingList({ familyCode, onClose }: { familyCode: string; onClose: () => void }) {
+function ShoppingList({ familyCode: initialCode, onClose }: { familyCode: string; onClose: () => void }) {
+  const [familyCode, setFamilyCode] = useState(initialCode);
+  const [codeInput, setCodeInput] = useState(initialCode);
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,6 +32,7 @@ function ShoppingList({ familyCode, onClose }: { familyCode: string; onClose: ()
   return <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3" dir="rtl">
     <section role="dialog" aria-modal="true" aria-label="רשימת קניות" className="bg-[#FAF8F5] w-full max-w-xl max-h-[90dvh] overflow-y-auto rounded-3xl border border-[#D6CFC4] p-5 shadow-xl text-[#5D4037]">
       <div className="flex justify-between items-center gap-3 mb-4"><h2 className="text-xl font-bold">🛒 רשימת קניות</h2><button onClick={onClose} aria-label="סגירת רשימת קניות" className="p-3 rounded-xl bg-white border border-[#D6CFC4]"><X size={20} /></button></div>
+      <details className="mb-4"><summary className="cursor-pointer text-sm">קוד משפחה לרשימה</summary><form className="flex gap-2 mt-2" onSubmit={e => { e.preventDefault(); if (/^[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(codeInput)) setFamilyCode(codeInput); }}><input aria-label="קוד משפחה לרשימת קניות" value={codeInput} onChange={e => setCodeInput(e.target.value.toUpperCase())} maxLength={9} pattern="[A-Z2-9]{4}-[A-Z2-9]{4}" required className="min-w-0 flex-1 rounded-xl border p-3" /><button className="rounded-xl bg-[#8A9A5B] text-white px-3">פתח רשימה</button></form><p className="text-xs mt-2">הבחירה כאן משנה רק את רשימת הקניות, בלי לשנות סנכרון משימות.</p></details>
       {!familyCode ? <p>כדי להשתמש ברשימה המשפחתית יש להזין קוד משפחה באזור הסנכרון.</p> : <>
         <p className="text-sm text-[#8C8479] mb-4">רשימה משותפת לכל מכשירי המשפחה. פריטים שנקנו יורדים מהרשימה הפעילה.</p>
         <form className="flex gap-2 mb-4" onSubmit={async e => { e.preventDefault(); if (await change(doc => addShoppingItem(doc, name, 'other', 'manual'))) setName(''); }}>
