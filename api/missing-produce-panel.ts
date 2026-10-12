@@ -13,10 +13,10 @@ const HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ניטור חוסרים - פירות וירקות</title>
 <style>
-  body { font-family: Arial, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 12px; }
+  body { font-family: Arial, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 12px; }
   table { border-collapse: collapse; width: 100%; margin-top: 12px; }
   td, th { border: 1px solid #ccc; padding: 6px 8px; text-align: right; font-size: 14px; }
-  input, select, button { font-size: 15px; padding: 6px 8px; }
+  input, select, button { font-size: 15px; padding: 10px; max-width: 100%; box-sizing: border-box; }
   .err { color: #b00; } .ok { color: #080; } .muted { color: #777; }
   #panel { display: none; }
 </style>
@@ -31,7 +31,8 @@ const HTML = `<!DOCTYPE html>
 <div id="panel">
   <p class="muted" id="dateinfo"></p>
   <div id="content"></div>
-  <h3>הוספת פריט</h3>
+  <h3>רשימת הקניות הנוכחית</h3><div id="shopping"></div>
+  <h3>הוספה ידנית לרשימת הקניות</h3>
   <input id="newname" placeholder="שם הפריט (למשל 🍎 תפוח)">
   <select id="newkind">
     <option value="fruit">פרי</option>
@@ -53,36 +54,40 @@ function api(path, opts) {
 function kindLabel(k) { return k === 'fruit' ? 'פרי' : k === 'veg' ? 'ירק' : 'אחר'; }
 function render(d) {
   document.getElementById('dateinfo').textContent = 'תאריך: ' + d.date + ' | קוד משפחה: ' + d.familyCode;
-  var c = document.getElementById('content');
-  if (!d.docExists || !d.items || !d.items.length) {
-    c.innerHTML = '<p class="muted">אין דיווחי חוסרים להיום.</p>';
-    return;
-  }
-  var h = '<table><tr><th>שם</th><th>סוג</th><th>ילד</th><th>סטטוס</th><th></th></tr>';
-  d.items.forEach(function(m) {
-    h += '<tr><td>' + m.name + '</td><td>' + kindLabel(m.kind) + '</td><td>' + (m.childName || '') + '</td><td>' +
-      (m.notified ? 'טופל ✓' : 'ממתין') + '</td><td>' +
-      (m.notified ? '' : '<button data-id="' + m.id + '" class="markbtn">סמן כמטופל</button>') + '</td></tr>';
+  var c = document.getElementById('content'); c.replaceChildren();
+  if (!d.items || !d.items.length) { var empty = document.createElement('p'); empty.textContent = 'אין דיווחי חוסרים להיום.'; c.appendChild(empty); }
+  (d.items || []).forEach(function(m) {
+    var row = document.createElement('div'); row.style.cssText = 'padding:12px;border-bottom:1px solid #ddd;display:flex;gap:8px;flex-wrap:wrap;align-items:center';
+    var text = document.createElement('span'); text.textContent = m.name + ' | ' + kindLabel(m.kind) + ' | ' + (m.childName || '') + ' | ' + (m.notified ? 'טופל ✓' : 'ממתין'); row.appendChild(text);
+    if (!m.notified) {
+      var add = document.createElement('button'); add.textContent = 'הוסף לרשימת הקניות';
+      add.onclick = function() { post({action:'addToShoppingList', name:m.name, kind:m.kind, source:'missing-report'}); }; row.appendChild(add);
+      var mark = document.createElement('button'); mark.textContent = 'סמן כמטופל';
+      mark.onclick = function() { post({action:'markNotified', ids:[m.id]}); }; row.appendChild(mark);
+    }
+    c.appendChild(row);
   });
-  c.innerHTML = h + '</table>';
-  var btns = document.querySelectorAll('.markbtn');
-  for (var i = 0; i < btns.length; i++) {
-    btns[i].onclick = function() {
-      var id = this.getAttribute('data-id');
-      msg('panelmsg', 'מסמן...', 'muted');
-      api(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'markNotified', ids: [id] }) })
-        .then(function(r) { return r.json(); })
-        .then(function(d2) { msg('panelmsg', d2.ok ? 'סומן ✓' : 'שגיאה: ' + (d2.error || ''), d2.ok ? 'ok' : 'err'); load(); })
-        .catch(function(e) { msg('panelmsg', 'שגיאה: ' + e, 'err'); });
-    };
-  }
+  var shopping = document.getElementById('shopping'); shopping.replaceChildren();
+  var items = (d.shoppingList || []).filter(function(i) { return !i.bought; });
+  var list = document.createElement('ul');
+  items.forEach(function(i) { var li = document.createElement('li'); li.textContent = i.name + ' (' + (i.source === 'manual' ? 'ידני' : 'דיווח חוסרים') + ')'; list.appendChild(li); });
+  if (!items.length) { var empty = document.createElement('p'); empty.textContent = 'אין פריטים פתוחים ברשימת הקניות.'; shopping.appendChild(empty); } else shopping.appendChild(list);
 }
+function post(body) {
+  msg('panelmsg', 'שומר...', 'muted');
+  return api(API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+    .then(function(r) { return r.json(); }).then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'שגיאה');
+      msg('panelmsg', 'נשמר ✓', 'ok'); load(); return true;
+    }).catch(function(e) { msg('panelmsg', 'שגיאה: ' + e.message, 'err'); return false; });
+}
+
 function load() {
   api(API).then(function(r) {
     if (r.status === 401) { throw new Error('unauthorized'); }
     return r.json();
   }).then(function(d) {
+    if (!d.ok) throw new Error(d.error || 'שגיאה');
     document.getElementById('login').style.display = 'none';
     document.getElementById('panel').style.display = 'block';
     render(d);
@@ -104,12 +109,7 @@ document.getElementById('addbtn').onclick = function() {
   var name = document.getElementById('newname').value.trim();
   var kind = document.getElementById('newkind').value;
   if (!name) { msg('panelmsg', 'יש להזין שם פריט', 'err'); return; }
-  msg('panelmsg', 'מוסיף...', 'muted');
-  api(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'add', name: name, kind: kind }) })
-    .then(function(r) { return r.json(); })
-    .then(function(d2) { msg('panelmsg', d2.ok ? 'נוסף ✓' : 'שגיאה: ' + (d2.error || ''), d2.ok ? 'ok' : 'err'); document.getElementById('newname').value = ''; load(); })
-    .catch(function(e) { msg('panelmsg', 'שגיאה: ' + e, 'err'); });
+  post({action:'addToShoppingList', name:name, kind:kind, source:'manual'}).then(function(ok) { if (ok) document.getElementById('newname').value = ''; });
 };
 if (tok()) load();
 </script>
