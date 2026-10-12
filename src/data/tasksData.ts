@@ -331,13 +331,56 @@ function _seededRand(seed: number) {
   };
 }
 
-function _rollDutyAssignments(rand: () => number, duties: SharedDuty[]): Record<string, string> {
-  const assignments: Record<string, string> = {};
-  duties.forEach(duty => {
-    const eligible = CHILDREN.filter(c => getChildAge(c) >= duty.minAge);
-    if (eligible.length > 0) {
-      assignments[duty.id] = eligible[Math.floor(rand() * eligible.length)].id;
+// Fair rotation: every duty goes to the eligible child who did THAT duty
+// least recently (never-done counts as oldest). Ties are broken first by
+// who has fewer duties already today, then randomly. History is read from
+// the per-day assignments the app already persists in localStorage
+// (hallel_daily_duties_<date>), so nothing extra needs to be stored.
+export type DutyHistory = Record<string, Record<string, string>>; // dutyId -> childId -> last date key
+
+export function loadDutyHistory(today: string): DutyHistory {
+  const hist: DutyHistory = {};
+  try {
+    const prefix = 'hallel_daily_duties_';
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(prefix)) continue;
+      const date = k.slice(prefix.length);
+      if (date >= today) continue;
+      let asg: Record<string, string> = {};
+      try { asg = JSON.parse(localStorage.getItem(k) || '{}'); } catch {}
+      Object.entries(asg).forEach(([duty, child]) => {
+        const h = (hist[duty] = hist[duty] || {});
+        if (!h[child] || h[child] < date) h[child] = date;
+      });
     }
+  } catch {}
+  return hist;
+}
+
+export function rollFairDutyAssignments(
+  rand: () => number,
+  duties: SharedDuty[],
+  history: DutyHistory,
+  avoid: Record<string, string> = {},
+): Record<string, string> {
+  const assignments: Record<string, string> = {};
+  const load: Record<string, number> = {};
+  CHILDREN.forEach(c => { load[c.id] = 0; });
+  duties.forEach(duty => {
+    let eligible = CHILDREN.filter(c => getChildAge(c) >= duty.minAge);
+    if (eligible.length === 0) return;
+    if (avoid[duty.id] && eligible.length > 1) {
+      eligible = eligible.filter(c => c.id !== avoid[duty.id]);
+    }
+    const last = (id: string) => (history[duty.id] && history[duty.id][id]) || '';
+    const oldest = eligible.reduce((m, c) => (last(c.id) < m ? last(c.id) : m), last(eligible[0].id));
+    let pool = eligible.filter(c => last(c.id) === oldest);
+    const minLoad = Math.min(...pool.map(c => load[c.id]));
+    pool = pool.filter(c => load[c.id] === minLoad);
+    const pick = pool[Math.floor(rand() * pool.length)];
+    assignments[duty.id] = pick.id;
+    load[pick.id]++;
   });
   return assignments;
 }
@@ -355,7 +398,7 @@ export function getDailyDutyAssignments(): Record<string, string> {
 
   const duties = _isDateFriday(today) ? FRIDAY_DUTIES : SHARED_DUTIES;
   const seed = today.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const assignments = _rollDutyAssignments(_seededRand(seed), duties);
+  const assignments = rollFairDutyAssignments(_seededRand(seed), duties, loadDutyHistory(today));
   localStorage.setItem(key, JSON.stringify(assignments));
   return assignments;
 }
@@ -369,7 +412,9 @@ export function reshuffleDailyDutyAssignments(): Record<string, string> {
   const today = getLocalDateKey();
   const key = `hallel_daily_duties_${today}`;
   const duties = _isDateFriday(today) ? FRIDAY_DUTIES : SHARED_DUTIES;
-  const assignments = _rollDutyAssignments(Math.random, duties);
+  let prev: Record<string, string> = {};
+  try { prev = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
+  const assignments = rollFairDutyAssignments(Math.random, duties, loadDutyHistory(today), prev);
   localStorage.setItem(key, JSON.stringify(assignments));
   return assignments;
 }
@@ -384,7 +429,7 @@ export function previewDutyAssignments(isFriday: boolean): Record<string, string
   if (isFriday === _isDateFriday(today)) return getDailyDutyAssignments();
   const duties = isFriday ? FRIDAY_DUTIES : SHARED_DUTIES;
   const seed = today.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return _rollDutyAssignments(_seededRand(seed), duties);
+  return rollFairDutyAssignments(_seededRand(seed), duties, loadDutyHistory(today));
 }
 
 // ========== PERSONAL TASK TEMPLATES (per-child hygiene, homework, own room) ==========
