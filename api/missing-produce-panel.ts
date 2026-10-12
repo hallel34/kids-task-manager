@@ -22,7 +22,7 @@ const HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h2>🛒 ניטור חוסרים בבית</h2>
+<h2>🛒 ניטור חוסרים ורשימת קניות</h2>
 <div id="login">
   <label>טוקן: <input type="password" id="token" size="40" autocomplete="off"></label>
   <button id="connect">התחבר</button>
