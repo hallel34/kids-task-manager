@@ -11,7 +11,7 @@ const HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ניטור חוסרים - פירות וירקות</title>
+<title>ניטור חוסרים ורשימת קניות</title>
 <style>
   body { font-family: Arial, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 12px; }
   table { border-collapse: collapse; width: 100%; margin-top: 12px; }
@@ -60,8 +60,9 @@ function render(d) {
     var row = document.createElement('div'); row.style.cssText = 'padding:12px;border-bottom:1px solid #ddd;display:flex;gap:8px;flex-wrap:wrap;align-items:center';
     var text = document.createElement('span'); text.textContent = m.name + ' | ' + kindLabel(m.kind) + ' | ' + (m.childName || '') + ' | ' + (m.notified ? 'טופל ✓' : 'ממתין'); row.appendChild(text);
     if (!m.notified) {
+      var manual = m.childId === 'manual-shopping';
       var add = document.createElement('button'); add.textContent = 'הוסף לרשימת הקניות';
-      add.onclick = function() { post({action:'addToShoppingList', name:m.name, kind:m.kind, source:'missing-report'}); }; row.appendChild(add);
+      add.onclick = function() { post({action:'addToShoppingList', name:m.name, kind:m.kind, source:'missing-report'}); }; if (!manual) row.appendChild(add);
       var mark = document.createElement('button'); mark.textContent = 'סמן כמטופל';
       mark.onclick = function() { post({action:'markNotified', ids:[m.id]}); }; row.appendChild(mark);
     }
@@ -70,7 +71,7 @@ function render(d) {
   var shopping = document.getElementById('shopping'); shopping.replaceChildren();
   var items = (d.shoppingList || []).filter(function(i) { return !i.bought; });
   var list = document.createElement('ul');
-  items.forEach(function(i) { var li = document.createElement('li'); li.textContent = i.name + ' (' + (i.source === 'manual' ? 'ידני' : 'דיווח חוסרים') + ')'; list.appendChild(li); });
+  items.forEach(function(i) { var li = document.createElement('li'); li.textContent = i.name + ' (' + (i.source === 'manual' ? 'ידני' : 'דיווח חוסרים') + ')' + (i.addedAt ? ' | ' + new Date(i.addedAt).toLocaleString('he-IL', {timeZone:'Asia/Jerusalem'}) : ''); list.appendChild(li); });
   if (!items.length) { var empty = document.createElement('p'); empty.textContent = 'אין פריטים פתוחים ברשימת הקניות.'; shopping.appendChild(empty); } else shopping.appendChild(list);
 }
 function post(body) {
