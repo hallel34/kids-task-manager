@@ -16,7 +16,7 @@ const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמיש
 const pad = (n: number) => String(n).padStart(2, '0');
 const keyOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-const VEG = ['🥒 מלפפון', '🍅 עגבנייה', '🥕 גזר', '🫑 פלפל', '🥬 חסה', '🥦 ברוקולי', '🥗 סלט ירקות'];
+const VEG = ['🥒 מלפפון', '🍅 עגבנייה', '🥕 גזר', '🫑 פלפל', '🥬 חסה', '🥗 סלט ירקות'];
 // Seasonal fruit (Israel), by month of the day the breakfast is for.
 const FRUIT_BY_SEASON: Record<string, string[]> = {
   winter: ['🍌 בננה', '🍎 תפוח', '🍐 אגס', '🥝 קיווי', '🍇 ענבים'],

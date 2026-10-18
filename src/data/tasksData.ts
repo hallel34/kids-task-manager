@@ -24,7 +24,7 @@ export const CHILDREN: Child[] = [
 
 // Maximum smileys a child can hold - reaching the cap earns a gift, and no
 // further smileys accumulate until the gift is redeemed.
-export const MAX_SMILEYS = 10;
+export const MAX_SMILEYS = 15;
 
 // Screen time reward (in minutes) per child
 // NEW: Per-task points system - each mandatory task earns points, no need to complete ALL
