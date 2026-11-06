@@ -36,6 +36,17 @@ export const SCREEN_TIME_REWARD: Record<string, { base: number; bonusPerOptional
   rafael: { base: 20, bonusPerOptional: 3, pointsPerMandatory: 2, pointsPerOptional: 1 },
 };
 
+// Default screen-time/points rates by age band - mirrors the per-child
+// SCREEN_TIME_REWARD values above. Used when a family's roster comes from a
+// cloud config (cloudStorage.CloudFamilyConfig) that doesn't specify custom
+// rates for a child, so a config only has to carry identity, not economics.
+export function defaultScreenTimeReward(age: number): { base: number; bonusPerOptional: number; pointsPerMandatory: number; pointsPerOptional: number } {
+  if (age >= 13) return { base: 60, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 };
+  if (age >= 10) return { base: 45, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 };
+  if (age >= 7) return { base: 30, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 };
+  return { base: 20, bonusPerOptional: 3, pointsPerMandatory: 2, pointsPerOptional: 1 };
+}
+
 // Prize store items - redeemable with points
 export interface PrizeItem {
   id: string;
