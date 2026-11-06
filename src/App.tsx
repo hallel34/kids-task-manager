@@ -6,7 +6,7 @@ import { useFindDevice } from './hooks/useFindDevice';
 import { EmojiConfettiBurst } from './components/EmojiConfettiBurst';
 import { BreakfastPicker } from './components/BreakfastPicker';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
-import { getLocalDateKey, getChildAge } from './utils/date';
+import { getLocalDateKey, getChildAge, getAgeFromBirthdate } from './utils/date';
 import type { Task, Child, TimeOfDay, ViewMode } from './types';
 import {
   safeParseJSON,
@@ -38,6 +38,8 @@ import {
 } from './data/tasksData';
 import type { PrizeItem, RedemptionRecord, PendingApprovalRecord, PlayTimerRecord } from './data/tasksData';
 import { usePrizeStoreSync } from './hooks/usePrizeStoreSync';
+import { loadFamilyConfigFromCloud } from './cloudStorage';
+import { defaultScreenTimeReward } from './data/tasksData';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Check, 
@@ -85,7 +87,85 @@ function formatPlayTimerRemaining(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
+// ================= FAMILY CONFIG GATE (family-code sync path) =================
+// When cross-device sync is enabled, a family's roster can live in the cloud
+// at families/{code}/config/current instead of being compiled into the bundle
+// (see cloudStorage.loadFamilyConfigFromCloud). This wrapper loads that
+// config BEFORE the app proper mounts, then hands it over through the exact
+// same `familyData` prop the Firebase Auth path (AppWrapper) uses - so the
+// roster-override logic inside AppMain is shared by both paths. When there
+// is no config (or sync is off) AppMain renders with no familyData, i.e. the
+// compiled-in defaults from tasksData.ts, exactly as before this gate existed.
+interface GateState {
+  status: 'loading' | 'ready';
+  familyData?: import('./useAuth').FamilyData;
+}
+
+export default function App(props: AppProps = {}) {
+  const [gate, setGate] = useState<GateState>(() => {
+    if (props.familyData) return { status: 'ready', familyData: props.familyData };
+    const syncOn = localStorage.getItem('hallel_sync_enabled') === 'true';
+    const code = localStorage.getItem('hallel_family_code');
+    return syncOn && code ? { status: 'loading' } : { status: 'ready' };
+  });
+
+  useEffect(() => {
+    if (gate.status !== 'loading') return;
+    const code = localStorage.getItem('hallel_family_code');
+    if (!code) { setGate({ status: 'ready' }); return; }
+    let cancelled = false;
+    loadFamilyConfigFromCloud(code)
+      .then((res) => {
+        if (cancelled) return;
+        const cfg = res?.config;
+        if (cfg && Array.isArray(cfg.children) && cfg.children.length > 0) {
+          const screenTimeRewards: Record<string, { base: number; bonusPerOptional: number; pointsPerMandatory: number; pointsPerOptional: number }> = {};
+          cfg.children.forEach((c) => {
+            const effAge = c.birthdate ? getAgeFromBirthdate(c.birthdate) : c.age;
+            screenTimeRewards[c.id] = { ...defaultScreenTimeReward(effAge), ...(cfg.screenTimeRewards?.[c.id] || {}) };
+          });
+          setGate({
+            status: 'ready',
+            familyData: {
+              familyName: cfg.familyName || '',
+              parentPin: cfg.parentPin || '',
+              children: cfg.children.map((c) => ({
+                id: c.id,
+                name: c.name,
+                age: c.birthdate ? getAgeFromBirthdate(c.birthdate) : c.age,
+                birthdate: c.birthdate,
+                gender: c.gender === 'male' ? 'male' : 'female',
+                color: c.color,
+                avatarEmoji: c.avatarEmoji,
+                photo: c.photo,
+              })),
+              screenTimeRewards,
+              createdAt: 0,
+            },
+          });
+        } else {
+          setGate({ status: 'ready' });
+        }
+      })
+      .catch(() => { if (!cancelled) setGate({ status: 'ready' }); });
+    return () => { cancelled = true; };
+  }, [gate.status]);
+
+  if (gate.status === 'loading') {
+    return (
+      <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center" dir="rtl">
+        <div className="text-center space-y-4">
+          <span className="text-5xl block animate-bounce">📋</span>
+          <p className="text-[#8C8479] font-bold">טוען...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <AppMain {...props} familyData={gate.familyData ?? props.familyData} />;
+}
+
+function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
   // If familyData is provided (from Firebase), override CHILDREN and settings
   // We reassign the module-level CHILDREN so all references work
   if (familyData) {
