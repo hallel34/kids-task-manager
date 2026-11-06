@@ -157,3 +157,68 @@ export function listenToTasks(_userId: string, _date: string, _callback: (tasks:
   return () => {}; // noop unsubscribe
 }
 
+// ================= FAMILY CONFIG (per-family roster, cloud-driven) =================
+// A family's roster - children, their screen-time/points rates, and the
+// parent PIN - can live in the cloud under the family code instead of being
+// compiled into the bundle (tasksData.ts CHILDREN). App.tsx's config gate
+// loads this once at startup and, when present, feeds it through the same
+// `familyData` prop the Firebase Auth path uses. The children's daily task
+// lists are NOT stored here: they are derived from each child's age by the
+// templates in tasksData.ts (getInitialTasksForChild / getFridayTasksForChild),
+// so a config only carries identity + reward settings.
+export interface CloudFamilyConfig {
+  familyName?: string;
+  parentPin?: string;
+  children: Array<{
+    id: string;
+    name: string;
+    age: number;
+    birthdate?: string; // "yyyy-mm-dd" - when set, the app computes the live age from it
+    gender?: 'male' | 'female';
+    color: string;
+    avatarEmoji: string;
+    photo: string;
+  }>;
+  screenTimeRewards?: Record<string, { base: number; bonusPerOptional: number; pointsPerMandatory?: number; pointsPerOptional?: number }>;
+}
+
+// Save the family config to Firestore. Returns the updatedAt stamp it wrote
+// (same versioning pattern as saveRewardsToCloud).
+export async function saveFamilyConfigToCloud(familyCode: string, config: CloudFamilyConfig, updatedAt: number = Date.now()): Promise<number> {
+  const url = fsUrl(`families/${familyCode}/config/current`);
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        config: { stringValue: JSON.stringify(config) },
+        updatedAt: { integerValue: String(updatedAt) },
+      }
+    })
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Firestore family config save failed ${resp.status}: ${err.slice(0, 100)}`);
+  }
+  return updatedAt;
+}
+
+// Load the family config from Firestore, or null when this family has none
+// (404 / unreadable / malformed) - callers then fall back to the compiled-in
+// defaults, so a family that never opted into a cloud config is unaffected.
+export async function loadFamilyConfigFromCloud(familyCode: string): Promise<{ config: CloudFamilyConfig; updatedAt: number } | null> {
+  const url = fsUrl(`families/${familyCode}/config/current`);
+  const resp = await fetch(url);
+  if (resp.status === 404) return null;
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  const raw = data?.fields?.config?.stringValue;
+  if (!raw) return null;
+  const updatedAt = Number(data?.fields?.updatedAt?.integerValue || 0);
+  try {
+    const config = JSON.parse(raw) as CloudFamilyConfig;
+    if (!Array.isArray(config.children) || config.children.length === 0) return null;
+    return { config, updatedAt };
+  } catch { return null; }
+}
+

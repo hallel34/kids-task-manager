@@ -14,6 +14,7 @@ export interface FamilyChild {
   id: string;
   name: string;
   age: number;
+  birthdate?: string; // "yyyy-mm-dd" - when set, the effective age is computed from it (getChildAge)
   gender: 'male' | 'female';
   color: string;
   avatarEmoji: string;
