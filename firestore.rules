@@ -54,6 +54,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Family config: the family's roster (children + reward rates + parent
+    // PIN) when it lives in the cloud rather than in tasksData.ts. Written
+    // by the onboarding flow / a parent device; read by App.tsx's config
+    // gate at startup. Shape-validated like the other sub-documents.
+    match /families/{familyId}/config/current {
+      allow get: if true;
+      allow create, update: if request.resource.data.keys().hasOnly(['config', 'updatedAt'])
+        && request.resource.data.config is string
+        && request.resource.data.config.size() < 100000
+        && request.resource.data.updatedAt is int;
+      allow delete: if false;
+    }
+
     // "Find my tablet" remote alarm command. Any device holding the family
     // code can read this (a tablet must react no matter which screen it's
     // showing - it isn't gated behind the parent PIN, which is a client-
