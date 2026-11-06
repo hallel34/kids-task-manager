@@ -1,0 +1,240 @@
+diff --git a/firestore.rules b/firestore.rules
+index d2e2ea1..c9e5814 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -54,6 +54,19 @@ service cloud.firestore {
+       allow delete: if false;
+     }
+ 
++    // Family config: the family's roster (children + reward rates + parent
++    // PIN) when it lives in the cloud rather than in tasksData.ts. Written
++    // by the onboarding flow / a parent device; read by App.tsx's config
++    // gate at startup. Shape-validated like the other sub-documents.
++    match /families/{familyId}/config/current {
++      allow get: if true;
++      allow create, update: if request.resource.data.keys().hasOnly(['config', 'updatedAt'])
++        && request.resource.data.config is string
++        && request.resource.data.config.size() < 100000
++        && request.resource.data.updatedAt is int;
++      allow delete: if false;
++    }
++
+     // "Find my tablet" remote alarm command. Any device holding the family
+     // code can read this (a tablet must react no matter which screen it's
+     // showing - it isn't gated behind the parent PIN, which is a client-
+diff --git a/src/App.tsx b/src/App.tsx
+index b01b9f1..c41a9b1 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -6,7 +6,7 @@ import { useFindDevice } from './hooks/useFindDevice';
+ import { EmojiConfettiBurst } from './components/EmojiConfettiBurst';
+ import { BreakfastPicker } from './components/BreakfastPicker';
+ import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
+-import { getLocalDateKey, getChildAge } from './utils/date';
++import { getLocalDateKey, getChildAge, getAgeFromBirthdate } from './utils/date';
+ import type { Task, Child, TimeOfDay, ViewMode } from './types';
+ import {
+   safeParseJSON,
+@@ -38,6 +38,8 @@ import {
+ } from './data/tasksData';
+ import type { PrizeItem, RedemptionRecord, PendingApprovalRecord, PlayTimerRecord } from './data/tasksData';
+ import { usePrizeStoreSync } from './hooks/usePrizeStoreSync';
++import { loadFamilyConfigFromCloud } from './cloudStorage';
++import { defaultScreenTimeReward } from './data/tasksData';
+ import { motion, AnimatePresence } from 'motion/react';
+ import { 
+   Check, 
+@@ -85,7 +87,85 @@ function formatPlayTimerRemaining(ms: number): string {
+   return `${minutes}:${String(seconds).padStart(2, '0')}`;
+ }
+ 
+-export default function App({ familyData, userId, onSignOut }: AppProps = {}) {
++// ================= FAMILY CONFIG GATE (family-code sync path) =================
++// When cross-device sync is enabled, a family's roster can live in the cloud
++// at families/{code}/config/current instead of being compiled into the bundle
++// (see cloudStorage.loadFamilyConfigFromCloud). This wrapper loads that
++// config BEFORE the app proper mounts, then hands it over through the exact
++// same `familyData` prop the Firebase Auth path (AppWrapper) uses - so the
++// roster-override logic inside AppMain is shared by both paths. When there
++// is no config (or sync is off) AppMain renders with no familyData, i.e. the
++// compiled-in defaults from tasksData.ts, exactly as before this gate existed.
++interface GateState {
++  status: 'loading' | 'ready';
++  familyData?: import('./useAuth').FamilyData;
++}
++
++export default function App(props: AppProps = {}) {
++  const [gate, setGate] = useState<GateState>(() => {
++    if (props.familyData) return { status: 'ready', familyData: props.familyData };
++    const syncOn = localStorage.getItem('hallel_sync_enabled') === 'true';
++    const code = localStorage.getItem('hallel_family_code');
++    return syncOn && code ? { status: 'loading' } : { status: 'ready' };
++  });
++
++  useEffect(() => {
++    if (gate.status !== 'loading') return;
++    const code = localStorage.getItem('hallel_family_code');
++    if (!code) { setGate({ status: 'ready' }); return; }
++    let cancelled = false;
++    loadFamilyConfigFromCloud(code)
++      .then((res) => {
++        if (cancelled) return;
++        const cfg = res?.config;
++        if (cfg && Array.isArray(cfg.children) && cfg.children.length > 0) {
++          const screenTimeRewards: Record<string, { base: number; bonusPerOptional: number; pointsPerMandatory: number; pointsPerOptional: number }> = {};
++          cfg.children.forEach((c) => {
++            const effAge = c.birthdate ? getAgeFromBirthdate(c.birthdate) : c.age;
++            screenTimeRewards[c.id] = { ...defaultScreenTimeReward(effAge), ...(cfg.screenTimeRewards?.[c.id] || {}) };
++          });
++          setGate({
++            status: 'ready',
++            familyData: {
++              familyName: cfg.familyName || '',
++              parentPin: cfg.parentPin || '',
++              children: cfg.children.map((c) => ({
++                id: c.id,
++                name: c.name,
++                age: c.birthdate ? getAgeFromBirthdate(c.birthdate) : c.age,
++                birthdate: c.birthdate,
++                gender: c.gender === 'male' ? 'male' : 'female',
++                color: c.color,
++                avatarEmoji: c.avatarEmoji,
++                photo: c.photo,
++              })),
++              screenTimeRewards,
++              createdAt: 0,
++            },
++          });
++        } else {
++          setGate({ status: 'ready' });
++        }
++      })
++      .catch(() => { if (!cancelled) setGate({ status: 'ready' }); });
++    return () => { cancelled = true; };
++  }, [gate.status]);
++
++  if (gate.status === 'loading') {
++    return (
++      <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center" dir="rtl">
++        <div className="text-center space-y-4">
++          <span className="text-5xl block animate-bounce">📋</span>
++          <p className="text-[#8C8479] font-bold">טוען...</p>
++        </div>
++      </div>
++    );
++  }
++
++  return <AppMain {...props} familyData={gate.familyData ?? props.familyData} />;
++}
++
++function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
+   // If familyData is provided (from Firebase), override CHILDREN and settings
+   // We reassign the module-level CHILDREN so all references work
+   if (familyData) {
+diff --git a/src/cloudStorage.ts b/src/cloudStorage.ts
+index a796f34..0e85788 100644
+--- a/src/cloudStorage.ts
++++ b/src/cloudStorage.ts
+@@ -157,3 +157,68 @@ export function listenToTasks(_userId: string, _date: string, _callback: (tasks:
+   return () => {}; // noop unsubscribe
+ }
+ 
++// ================= FAMILY CONFIG (per-family roster, cloud-driven) =================
++// A family's roster - children, their screen-time/points rates, and the
++// parent PIN - can live in the cloud under the family code instead of being
++// compiled into the bundle (tasksData.ts CHILDREN). App.tsx's config gate
++// loads this once at startup and, when present, feeds it through the same
++// `familyData` prop the Firebase Auth path uses. The children's daily task
++// lists are NOT stored here: they are derived from each child's age by the
++// templates in tasksData.ts (getInitialTasksForChild / getFridayTasksForChild),
++// so a config only carries identity + reward settings.
++export interface CloudFamilyConfig {
++  familyName?: string;
++  parentPin?: string;
++  children: Array<{
++    id: string;
++    name: string;
++    age: number;
++    birthdate?: string; // "yyyy-mm-dd" - when set, the app computes the live age from it
++    gender?: 'male' | 'female';
++    color: string;
++    avatarEmoji: string;
++    photo: string;
++  }>;
++  screenTimeRewards?: Record<string, { base: number; bonusPerOptional: number; pointsPerMandatory?: number; pointsPerOptional?: number }>;
++}
++
++// Save the family config to Firestore. Returns the updatedAt stamp it wrote
++// (same versioning pattern as saveRewardsToCloud).
++export async function saveFamilyConfigToCloud(familyCode: string, config: CloudFamilyConfig, updatedAt: number = Date.now()): Promise<number> {
++  const url = fsUrl(`families/${familyCode}/config/current`);
++  const resp = await fetch(url, {
++    method: 'PATCH',
++    headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({
++      fields: {
++        config: { stringValue: JSON.stringify(config) },
++        updatedAt: { integerValue: String(updatedAt) },
++      }
++    })
++  });
++  if (!resp.ok) {
++    const err = await resp.text();
++    throw new Error(`Firestore family config save failed ${resp.status}: ${err.slice(0, 100)}`);
++  }
++  return updatedAt;
++}
++
++// Load the family config from Firestore, or null when this family has none
++// (404 / unreadable / malformed) - callers then fall back to the compiled-in
++// defaults, so a family that never opted into a cloud config is unaffected.
++export async function loadFamilyConfigFromCloud(familyCode: string): Promise<{ config: CloudFamilyConfig; updatedAt: number } | null> {
++  const url = fsUrl(`families/${familyCode}/config/current`);
++  const resp = await fetch(url);
++  if (resp.status === 404) return null;
++  if (!resp.ok) return null;
++  const data = await resp.json();
++  const raw = data?.fields?.config?.stringValue;
++  if (!raw) return null;
++  const updatedAt = Number(data?.fields?.updatedAt?.integerValue || 0);
++  try {
++    const config = JSON.parse(raw) as CloudFamilyConfig;
++    if (!Array.isArray(config.children) || config.children.length === 0) return null;
++    return { config, updatedAt };
++  } catch { return null; }
++}
++
+diff --git a/src/data/tasksData.ts b/src/data/tasksData.ts
+index 40f51b1..9467c4a 100644
+--- a/src/data/tasksData.ts
++++ b/src/data/tasksData.ts
+@@ -36,6 +36,17 @@ export const SCREEN_TIME_REWARD: Record<string, { base: number; bonusPerOptional
+   rafael: { base: 20, bonusPerOptional: 3, pointsPerMandatory: 2, pointsPerOptional: 1 },
+ };
+ 
++// Default screen-time/points rates by age band - mirrors the per-child
++// SCREEN_TIME_REWARD values above. Used when a family's roster comes from a
++// cloud config (cloudStorage.CloudFamilyConfig) that doesn't specify custom
++// rates for a child, so a config only has to carry identity, not economics.
++export function defaultScreenTimeReward(age: number): { base: number; bonusPerOptional: number; pointsPerMandatory: number; pointsPerOptional: number } {
++  if (age >= 13) return { base: 60, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 };
++  if (age >= 10) return { base: 45, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 };
++  if (age >= 7) return { base: 30, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 };
++  return { base: 20, bonusPerOptional: 3, pointsPerMandatory: 2, pointsPerOptional: 1 };
++}
++
+ // Prize store items - redeemable with points
+ export interface PrizeItem {
+   id: string;
+diff --git a/src/useAuth.ts b/src/useAuth.ts
+index cb30c1d..d50546e 100644
+--- a/src/useAuth.ts
++++ b/src/useAuth.ts
+@@ -14,6 +14,7 @@ export interface FamilyChild {
+   id: string;
+   name: string;
+   age: number;
++  birthdate?: string; // "yyyy-mm-dd" - when set, the effective age is computed from it (getChildAge)
+   gender: 'male' | 'female';
+   color: string;
+   avatarEmoji: string;
