@@ -11,15 +11,28 @@ export function safeParseJSON<T>(raw: string | null, fallback: T): T {
 }
 
 // ================= DATA CONSTANTS =================
+// The compiled-in defaults below are a FICTIONAL demo family ("משפחת דוגמה") -
+// they are what the demo mode and the no-code fallback render. A real family
+// never sees them: their roster overrides CHILDREN at startup, either from
+// Firebase Auth familyData or from the cloud config under their family code
+// (see the config gate in App.tsx and loadFamilyConfigFromCloud).
+//
 // Ages are computed from each child's birthdate (getAgeFromBirthdate runs on
 // every app load), so they update automatically on birthdays - no manual edit.
 // The static `age` field stays in sync at load time for simple display reads;
 // any age-dependent LOGIC should use getChildAge(child) directly.
+function demoAvatar(initial: string, color: string): string {
+  // Same self-contained initial-on-color SVG avatar FamilySetup generates for
+  // cloud-config children, so the demo family needs no photo files at all.
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><rect width='96' height='96' fill='${color}'/><text x='48' y='67' font-size='52' font-family='Arial, sans-serif' font-weight='bold' fill='#FFFFFF' text-anchor='middle'>${initial}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 export const CHILDREN: Child[] = [
-  { id: 'arava', name: 'ערבה', age: getAgeFromBirthdate('2013-04-09'), birthdate: '2013-04-09', gender: 'female', initial: 'ע', color: '#5D4037', avatarEmoji: '👧', photo: '/photos/arava.jpg' },
-  { id: 'hoshen', name: 'חושן', age: getAgeFromBirthdate('2015-09-25'), birthdate: '2015-09-25', gender: 'female', initial: 'ח', color: '#D35400', avatarEmoji: '👧', photo: '/photos/hoshen.jpg' },
-  { id: 'peer', name: 'פאר', age: getAgeFromBirthdate('2019-06-24'), birthdate: '2019-06-24', gender: 'male', initial: 'פ', color: '#6A7B42', avatarEmoji: '👦', photo: '/photos/peer.jpg' },
-  { id: 'rafael', name: 'רפאל', age: getAgeFromBirthdate('2021-07-12'), birthdate: '2021-07-12', gender: 'male', initial: 'ר', color: '#8A9A5B', avatarEmoji: '👦', photo: '/photos/rafael.jpg' },
+  { id: 'noa', name: 'נועה', age: getAgeFromBirthdate('2013-06-15'), birthdate: '2013-06-15', gender: 'female', initial: 'נ', color: '#5D4037', avatarEmoji: '👧', photo: demoAvatar('נ', '#5D4037') },
+  { id: 'michal', name: 'מיכל', age: getAgeFromBirthdate('2015-05-10'), birthdate: '2015-05-10', gender: 'female', initial: 'מ', color: '#D35400', avatarEmoji: '👧', photo: demoAvatar('מ', '#D35400') },
+  { id: 'uri', name: 'אורי', age: getAgeFromBirthdate('2019-03-12'), birthdate: '2019-03-12', gender: 'male', initial: 'א', color: '#6A7B42', avatarEmoji: '👦', photo: demoAvatar('א', '#6A7B42') },
+  { id: 'daniel', name: 'דניאל', age: getAgeFromBirthdate('2021-04-18'), birthdate: '2021-04-18', gender: 'male', initial: 'ד', color: '#8A9A5B', avatarEmoji: '👦', photo: demoAvatar('ד', '#8A9A5B') },
 ];
 
 // Maximum smileys a child can hold - reaching the cap earns a gift, and no
@@ -30,10 +43,10 @@ export const MAX_SMILEYS = 15;
 // NEW: Per-task points system - each mandatory task earns points, no need to complete ALL
 // Points can be spent in prize store OR converted to screen time
 export const SCREEN_TIME_REWARD: Record<string, { base: number; bonusPerOptional: number; pointsPerMandatory: number; pointsPerOptional: number }> = {
-  arava: { base: 60, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 },
-  hoshen: { base: 45, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 },
-  peer: { base: 30, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 },
-  rafael: { base: 20, bonusPerOptional: 3, pointsPerMandatory: 2, pointsPerOptional: 1 },
+  noa: { base: 60, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 },
+  michal: { base: 45, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 },
+  uri: { base: 30, bonusPerOptional: 5, pointsPerMandatory: 3, pointsPerOptional: 2 },
+  daniel: { base: 20, bonusPerOptional: 3, pointsPerMandatory: 2, pointsPerOptional: 1 },
 };
 
 // Default screen-time/points rates by age band - mirrors the per-child
@@ -89,30 +102,30 @@ export const PRIZE_STORE: PrizeItem[] = [
   { id: 'family_pizza', name: 'להזמין פיצה משפחתית', emoji: '🍕', cost: 180, category: 'premium', requiresApproval: true },
   { id: 'special_day_parent', name: 'יום מיוחד עם אבא או אמא', emoji: '🏆', cost: 300, category: 'premium', requiresApproval: true },
   // Per-child shops (age and taste adapted). Physical items - a parent approves each.
-  { id: 'ribbons', name: 'אביזרי שיער יפים', emoji: '🎀', cost: 100, category: 'personal', childIds: ['arava'], requiresApproval: true },
-  { id: 'nails', name: 'לק ומדבקות לציפורניים', emoji: '💅', cost: 110, category: 'personal', childIds: ['arava'], requiresApproval: true },
-  { id: 'jewelry', name: 'תכשיט קטן לבחירה', emoji: '💍', cost: 200, category: 'personal', childIds: ['arava'], requiresApproval: true },
-  { id: 'bag', name: 'תיק או ארנק', emoji: '👜', cost: 280, category: 'personal', childIds: ['arava'], requiresApproval: true },
-  { id: 'shirt', name: 'חולצה לבחירה', emoji: '👚', cost: 300, category: 'personal', childIds: ['arava'], requiresApproval: true },
-  { id: 'mall', name: 'יציאה עם אמא לקפה וקניות', emoji: '☕', cost: 160, category: 'personal', childIds: ['arava'], requiresApproval: true },
-  { id: 'h_hair', name: 'גומיות וסיכות מיוחדות', emoji: '🎀', cost: 90, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
-  { id: 'h_beads', name: 'ערכת צמידי חרוזים', emoji: '📿', cost: 120, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
-  { id: 'h_notebook', name: 'מחברת ומדבקות חמודות', emoji: '🦄', cost: 100, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
-  { id: 'h_craft', name: 'ערכת יצירה', emoji: '🎨', cost: 150, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
-  { id: 'h_hat', name: 'כובע או צעיף לבחירה', emoji: '🧢', cost: 180, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
-  { id: 'h_dress', name: 'שמלה או חולצה לבחירה', emoji: '👗', cost: 280, category: 'personal', childIds: ['hoshen'], requiresApproval: true },
-  { id: 'p_car', name: 'מכונית צעצוע', emoji: '🚗', cost: 100, category: 'personal', childIds: ['peer'], requiresApproval: true },
-  { id: 'p_cards', name: 'חבילת קלפי משחק', emoji: '🃏', cost: 100, category: 'personal', childIds: ['peer'], requiresApproval: true },
-  { id: 'p_lego', name: 'לגו קטן', emoji: '🧱', cost: 200, category: 'personal', childIds: ['peer'], requiresApproval: true },
-  { id: 'p_ball', name: 'כדורגל', emoji: '⚽', cost: 220, category: 'personal', childIds: ['peer'], requiresApproval: true },
-  { id: 'p_hero', name: 'חולצת גיבור על', emoji: '🦸', cost: 250, category: 'personal', childIds: ['peer'], requiresApproval: true },
-  { id: 'p_dad', name: 'יום מיוחד עם אבא', emoji: '🏆', cost: 300, category: 'personal', childIds: ['peer'], requiresApproval: true },
-  { id: 'r_bubbles', name: 'בועות סבון', emoji: '🫧', cost: 60, category: 'personal', childIds: ['rafael'], requiresApproval: true },
-  { id: 'r_stickers', name: 'מדבקות רכבים', emoji: '🚒', cost: 90, category: 'personal', childIds: ['rafael'], requiresApproval: true },
-  { id: 'r_dino', name: 'דינוזאור צעצוע', emoji: '🦖', cost: 120, category: 'personal', childIds: ['rafael'], requiresApproval: true },
-  { id: 'r_puzzle', name: 'פאזל', emoji: '🧩', cost: 150, category: 'personal', childIds: ['rafael'], requiresApproval: true },
-  { id: 'r_blocks', name: 'קוביות בנייה', emoji: '🧱', cost: 180, category: 'personal', childIds: ['rafael'], requiresApproval: true },
-  { id: 'r_shirt', name: 'חולצה עם רכב', emoji: '🚜', cost: 220, category: 'personal', childIds: ['rafael'], requiresApproval: true },
+  { id: 'ribbons', name: 'אביזרי שיער יפים', emoji: '🎀', cost: 100, category: 'personal', childIds: ['noa'], requiresApproval: true },
+  { id: 'nails', name: 'לק ומדבקות לציפורניים', emoji: '💅', cost: 110, category: 'personal', childIds: ['noa'], requiresApproval: true },
+  { id: 'jewelry', name: 'תכשיט קטן לבחירה', emoji: '💍', cost: 200, category: 'personal', childIds: ['noa'], requiresApproval: true },
+  { id: 'bag', name: 'תיק או ארנק', emoji: '👜', cost: 280, category: 'personal', childIds: ['noa'], requiresApproval: true },
+  { id: 'shirt', name: 'חולצה לבחירה', emoji: '👚', cost: 300, category: 'personal', childIds: ['noa'], requiresApproval: true },
+  { id: 'mall', name: 'יציאה עם אמא לקפה וקניות', emoji: '☕', cost: 160, category: 'personal', childIds: ['noa'], requiresApproval: true },
+  { id: 'h_hair', name: 'גומיות וסיכות מיוחדות', emoji: '🎀', cost: 90, category: 'personal', childIds: ['michal'], requiresApproval: true },
+  { id: 'h_beads', name: 'ערכת צמידי חרוזים', emoji: '📿', cost: 120, category: 'personal', childIds: ['michal'], requiresApproval: true },
+  { id: 'h_notebook', name: 'מחברת ומדבקות חמודות', emoji: '🦄', cost: 100, category: 'personal', childIds: ['michal'], requiresApproval: true },
+  { id: 'h_craft', name: 'ערכת יצירה', emoji: '🎨', cost: 150, category: 'personal', childIds: ['michal'], requiresApproval: true },
+  { id: 'h_hat', name: 'כובע או צעיף לבחירה', emoji: '🧢', cost: 180, category: 'personal', childIds: ['michal'], requiresApproval: true },
+  { id: 'h_dress', name: 'שמלה או חולצה לבחירה', emoji: '👗', cost: 280, category: 'personal', childIds: ['michal'], requiresApproval: true },
+  { id: 'p_car', name: 'מכונית צעצוע', emoji: '🚗', cost: 100, category: 'personal', childIds: ['uri'], requiresApproval: true },
+  { id: 'p_cards', name: 'חבילת קלפי משחק', emoji: '🃏', cost: 100, category: 'personal', childIds: ['uri'], requiresApproval: true },
+  { id: 'p_lego', name: 'לגו קטן', emoji: '🧱', cost: 200, category: 'personal', childIds: ['uri'], requiresApproval: true },
+  { id: 'p_ball', name: 'כדורגל', emoji: '⚽', cost: 220, category: 'personal', childIds: ['uri'], requiresApproval: true },
+  { id: 'p_hero', name: 'חולצת גיבור על', emoji: '🦸', cost: 250, category: 'personal', childIds: ['uri'], requiresApproval: true },
+  { id: 'p_dad', name: 'יום מיוחד עם אבא', emoji: '🏆', cost: 300, category: 'personal', childIds: ['uri'], requiresApproval: true },
+  { id: 'r_bubbles', name: 'בועות סבון', emoji: '🫧', cost: 60, category: 'personal', childIds: ['daniel'], requiresApproval: true },
+  { id: 'r_stickers', name: 'מדבקות רכבים', emoji: '🚒', cost: 90, category: 'personal', childIds: ['daniel'], requiresApproval: true },
+  { id: 'r_dino', name: 'דינוזאור צעצוע', emoji: '🦖', cost: 120, category: 'personal', childIds: ['daniel'], requiresApproval: true },
+  { id: 'r_puzzle', name: 'פאזל', emoji: '🧩', cost: 150, category: 'personal', childIds: ['daniel'], requiresApproval: true },
+  { id: 'r_blocks', name: 'קוביות בנייה', emoji: '🧱', cost: 180, category: 'personal', childIds: ['daniel'], requiresApproval: true },
+  { id: 'r_shirt', name: 'חולצה עם רכב', emoji: '🚜', cost: 220, category: 'personal', childIds: ['daniel'], requiresApproval: true },
 ];
 
 // A finalized redemption. `cooldownUntil` (epoch ms) is only present if the
@@ -257,7 +270,7 @@ export interface WeeklyMission {
 }
 
 export const WEEKLY_MISSIONS: WeeklyMission[] = [
-  { id: 'wm_cook_dinner', title: 'בישול ארוחת ערב', emoji: '🍳', time: 'evening', mandatory: true, requiresPhoto: true, points: 30, dayOfWeek: 1, childIds: ['arava', 'hoshen'] },
+  { id: 'wm_cook_dinner', title: 'בישול ארוחת ערב', emoji: '🍳', time: 'evening', mandatory: true, requiresPhoto: true, points: 30, dayOfWeek: 1, childIds: ['noa', 'michal'] },
 ];
 
 export function getWeeklyMissionTasksFor(childId: string, dayOfWeek: number): Task[] {
@@ -285,10 +298,10 @@ export const WEEKLY_EXCELLENCE_BONUS = 20; // bonus points for weekly excellence
 
 // School schedule info
 const SCHOOL_SCHEDULE: Record<string, { regular: string; tuesday: string }> = {
-  arava: { regular: '15:45', tuesday: '13:45' },
-  hoshen: { regular: '14:30', tuesday: '12:30' },
-  peer: { regular: '14:30', tuesday: '12:30' },
-  rafael: { regular: '16:00', tuesday: '16:00' },
+  noa: { regular: '15:45', tuesday: '13:45' },
+  michal: { regular: '14:30', tuesday: '12:30' },
+  uri: { regular: '14:30', tuesday: '12:30' },
+  daniel: { regular: '16:00', tuesday: '16:00' },
 };
 
 export function getSchoolEndTime(childId: string): string {
@@ -571,6 +584,72 @@ export function getFridayTasksForChild(childId: string): Task[] {
   return [...morningTasks, ...fridayEvening];
 }
 
+// The shared Motzei Shabbat chore pool. The house chores are NOT fixed per
+// child or per age band: on Saturday they are dealt by lottery among ALL
+// the children (see dealMotzashChores below) - one chore per child, plain
+// generic titles, no age scaling.
+export const MOTZASH_CHORE_POOL: Task[] = [
+  { id: 'ms_chore_house', time: 'evening', title: 'סידור הבית', emoji: '🧹', completed: false, mandatory: true },
+  { id: 'ms_chore_laundry', time: 'evening', title: 'כביסה', emoji: '🧺', completed: false, mandatory: true },
+  { id: 'ms_chore_dishes', time: 'evening', title: 'כלים', emoji: '🍽️', completed: false, mandatory: true },
+  { id: 'ms_chore_toys', time: 'evening', title: 'סידור הצעצועים והחדר', emoji: '🧸', completed: false, mandatory: true },
+];
+
+// The Saturday chore lottery. The pool is shuffled once and dealt in
+// roster order: child #i gets shuffled chore #i; children beyond the pool
+// size get no chore, and with fewer children only the first N shuffled
+// chores are used. The deal is memoized per (local date, roster) so every
+// per-child build in the same session - fresh board, editor/reset paths -
+// sees the SAME assignment, and once the generated board is saved (local
+// snapshot / cloud doc) the assignment is frozen in it: reloads and
+// reconciles restore it verbatim and never re-draw.
+let motzashDealCache: { key: string; chores: Record<string, Task> } | null = null;
+export function dealMotzashChores(): Record<string, Task> {
+  const key = `${getLocalDateKey()}|${CHILDREN.map(c => c.id).join(',')}`;
+  if (motzashDealCache && motzashDealCache.key === key) return motzashDealCache.chores;
+  const shuffled = [...MOTZASH_CHORE_POOL];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const chores: Record<string, Task> = {};
+  CHILDREN.forEach((c, i) => {
+    if (i < shuffled.length) chores[c.id] = { ...shuffled[i] };
+  });
+  motzashDealCache = { key, chores };
+  return chores;
+}
+
+// Motzei Shabbat (Saturday) tasks. Saturday is NOT a regular day: the board
+// carries no morning/afternoon tasks at all - only one small evening set per
+// child, composed of:
+// - one house chore from the shared lottery above (if one was dealt),
+// - the per-child breakfast choice - the very same task as on weekdays
+//   (id 'breakfast_choice', title 'בחירת ארוחת בוקר למחר'): every child
+//   picks their OWN breakfast for tomorrow,
+// - for the oldest band (13+) only: choosing tomorrow's lunch
+//   ('בחירת ארוחת צהריים למחר' - a choice, not a preparation),
+// - the personal evening basics each age band already has (shower - with
+//   help for the youngest - teeth, pajamas).
+export function getMotzashTasksForChild(childId: string): Task[] {
+  const child = CHILDREN.find(c => c.id === childId);
+  const age = child ? getChildAge(child) : 7;
+
+  const tasks: Task[] = [];
+  const chore = dealMotzashChores()[childId];
+  if (chore) tasks.push(chore);
+  tasks.push({ id: 'breakfast_choice', time: 'evening', title: 'בחירת ארוחת בוקר למחר', emoji: '🥣', completed: false, mandatory: true });
+  if (age >= 13) {
+    tasks.push({ id: 'ms_lunch_choice', time: 'evening', title: 'בחירת ארוחת צהריים למחר', emoji: '🍱', completed: false, mandatory: true });
+  }
+  tasks.push(
+    { id: 'ms_shower', time: 'evening', title: age <= 4 ? 'מקלחת (עם עזרה)' : 'מקלחת', emoji: '🚿', completed: false, mandatory: true },
+    { id: 'ms_teeth', time: 'evening', title: 'צחצוח שיניים', emoji: '🪥', completed: false, mandatory: true, requiresPhoto: true },
+    { id: 'ms_pajamas', time: 'evening', title: 'לבישת פיג׳מה', emoji: '💤', completed: false, mandatory: true },
+  );
+  return tasks;
+}
+
 // Build the assigned duty tasks for a child given an assignments map and a
 // duty pool (SHARED_DUTIES for weekdays, FRIDAY_DUTIES for Friday).
 export function getSharedDutyTasksFor(childId: string, assignments: Record<string, string>, duties: SharedDuty[] = SHARED_DUTIES): Task[] {
@@ -591,9 +670,10 @@ export function getSharedDutyTasksFor(childId: string, assignments: Record<strin
 // (0=Sun..6=Sat): template (Friday vs. a regular weekday) + duty rotation
 // (SHARED_DUTIES on weekdays, FRIDAY_DUTIES on Friday) + weekly missions
 // (WEEKLY_MISSIONS, fixed-assignee tasks tied to a specific day) + any
-// day-template custom tasks. Every place that builds a day's task list -
-// "today", the day-of-week editor preview, and the nightly regeneration in
-// App.tsx - goes through this so they can't drift apart from one another.
+// day-template custom tasks. Saturday is its own day type (see the branch
+// below). Every place that builds a day's task list - "today", the
+// day-of-week editor preview, and the nightly regeneration in App.tsx -
+// goes through this so they can't drift apart from one another.
 export function buildTasksForDayType(
   childId: string,
   dayOfWeek: number,
@@ -601,6 +681,15 @@ export function buildTasksForDayType(
   customDayTasks: Record<string, Task[]>
 ): Task[] {
   const isFriday = dayOfWeek === 5;
+  // Saturday (Motzei Shabbat): ONLY the small Motzash evening set - no
+  // weekday template, no duty rotation, no day-template custom tasks. The
+  // set itself (getMotzashTasksForChild) already carries the per-child
+  // breakfast choice and the child's lottery chore. Weekly missions
+  // still flow through the canonical call; by data they are Monday-only,
+  // so they add nothing on Saturday.
+  if (dayOfWeek === 6) {
+    return [...getMotzashTasksForChild(childId), ...getWeeklyMissionTasksFor(childId, dayOfWeek)];
+  }
   const base = isFriday ? getFridayTasksForChild(childId) : getInitialTasksForChild(childId);
   const shared = getSharedDutyTasksFor(childId, dutyAssignments, isFriday ? FRIDAY_DUTIES : SHARED_DUTIES);
   const missions = getWeeklyMissionTasksFor(childId, dayOfWeek);
@@ -608,7 +697,7 @@ export function buildTasksForDayType(
   const custom = customDayTasks[customKey] || [];
   // Mandatory end-of-day task for every child: pick tomorrow's breakfast.
   // Skip Friday evenings because the family does not use the tablet then.
-  // Saturday evening still picks Sunday breakfast (and Arava's lunch).
+  // (Saturday never reaches this line - it returns the Motzash set above.)
   const breakfast: Task = { id: 'breakfast_choice', time: 'evening', title: 'בחירת ארוחת בוקר למחר', emoji: '🥣', completed: false, mandatory: true };
   return [...base, ...shared, ...missions, ...custom, ...(isFriday ? [] : [breakfast])];
 }
