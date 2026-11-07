@@ -21,7 +21,7 @@ function reconcileBreakfastTasks(snapshot: Record<string, Task[]>, dayOfWeek = n
   return changed ? next : snapshot;
 }
 
-function generateFamilyCode(): string {
+export function generateFamilyCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 8; i++) {
