@@ -9,6 +9,30 @@ function reconcileBreakfastTasks(snapshot: Record<string, Task[]>, dayOfWeek = n
   let changed = false;
   const next = { ...snapshot };
   for (const [childId, list] of Object.entries(snapshot)) {
+    if (dayOfWeek === 6) {
+      // Saturday (Motzei Shabbat): breakfast choice is per-child, exactly
+      // like weekdays - every child's list carries exactly ONE canonical
+      // 'breakfast_choice' task. The Motzash generator already includes
+      // it; here we only repair snapshots that lack it, drop duplicates,
+      // and normalize the short-lived "for everyone" title variant to the
+      // per-child one. Chores and everything else stay untouched - the
+      // saved lottery assignment is never re-drawn.
+      const breakfasts = list.filter(task => task.id === 'breakfast_choice');
+      if (breakfasts.length === 0) {
+        next[childId] = [...list, { id: 'breakfast_choice', time: 'evening', title: 'בחירת ארוחת בוקר למחר', emoji: '🥣', completed: false, mandatory: true }];
+        changed = true;
+      } else if (breakfasts.length > 1 || breakfasts[0].title !== 'בחירת ארוחת בוקר למחר') {
+        let seen = false;
+        next[childId] = list.flatMap(task => {
+          if (task.id !== 'breakfast_choice') return [task];
+          if (seen) return [];
+          seen = true;
+          return task.title === 'בחירת ארוחת בוקר למחר' ? [task] : [{ ...task, title: 'בחירת ארוחת בוקר למחר' }];
+        });
+        changed = true;
+      }
+      continue;
+    }
     const hasBreakfast = list.some(task => task.id === 'breakfast_choice');
     if (dayOfWeek === 5 && hasBreakfast) {
       next[childId] = list.filter(task => task.id !== 'breakfast_choice');
