@@ -40,6 +40,7 @@ import type { PrizeItem, RedemptionRecord, PendingApprovalRecord, PlayTimerRecor
 import { usePrizeStoreSync } from './hooks/usePrizeStoreSync';
 import { loadFamilyConfigFromCloud } from './cloudStorage';
 import { defaultScreenTimeReward } from './data/tasksData';
+import { FamilySetup } from './components/FamilySetup';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Check, 
@@ -88,25 +89,31 @@ function formatPlayTimerRemaining(ms: number): string {
 }
 
 // ================= FAMILY CONFIG GATE (family-code sync path) =================
-// When cross-device sync is enabled, a family's roster can live in the cloud
-// at families/{code}/config/current instead of being compiled into the bundle
-// (see cloudStorage.loadFamilyConfigFromCloud). This wrapper loads that
-// config BEFORE the app proper mounts, then hands it over through the exact
-// same `familyData` prop the Firebase Auth path (AppWrapper) uses - so the
-// roster-override logic inside AppMain is shared by both paths. When there
-// is no config (or sync is off) AppMain renders with no familyData, i.e. the
-// compiled-in defaults from tasksData.ts, exactly as before this gate existed.
+// Routing, in order:
+//  1. familyData prop (Firebase Auth path, AppWrapper) -> straight to AppMain.
+//  2. Session-only demo flag (set from the landing page) -> AppMain with the
+//     compiled-in defaults, for visitors who just want to look.
+//  3. Sync on + a family code on this device -> load the family's roster from
+//     the cloud at families/{code}/config/current BEFORE the app mounts and
+//     hand it over through the same `familyData` prop, so the roster-override
+//     logic inside AppMain is shared by both paths. No config there -> AppMain
+//     with the compiled-in defaults, exactly as before this gate existed.
+//  4. Anything else (a brand-new device) -> the Stage 2 landing + setup flow
+//     (components/FamilySetup): create a family or join one with its code.
+//     FamilySetup finishes by setting localStorage + reloading, which lands
+//     the device in path 3. Enrolled family devices never reach path 4.
 interface GateState {
-  status: 'loading' | 'ready';
+  status: 'loading' | 'ready' | 'setup';
   familyData?: import('./useAuth').FamilyData;
 }
 
 export default function App(props: AppProps = {}) {
   const [gate, setGate] = useState<GateState>(() => {
     if (props.familyData) return { status: 'ready', familyData: props.familyData };
+    if (sessionStorage.getItem('kids_demo_mode') === '1') return { status: 'ready' };
     const syncOn = localStorage.getItem('hallel_sync_enabled') === 'true';
     const code = localStorage.getItem('hallel_family_code');
-    return syncOn && code ? { status: 'loading' } : { status: 'ready' };
+    return syncOn && code ? { status: 'loading' } : { status: 'setup' };
   });
 
   useEffect(() => {
@@ -160,6 +167,10 @@ export default function App(props: AppProps = {}) {
         </div>
       </div>
     );
+  }
+
+  if (gate.status === 'setup') {
+    return <FamilySetup />;
   }
 
   return <AppMain {...props} familyData={gate.familyData ?? props.familyData} />;
