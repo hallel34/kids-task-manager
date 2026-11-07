@@ -86,7 +86,7 @@ export function FamilySetup() {
   const handleCreate = async () => {
     setCreateError('');
     const name = familyName.trim();
-    if (!name) { setCreateError('בבקשה הזינו את שם המשפחה (למשל: לוי).'); return; }
+    if (!name) { setCreateError('בבקשה הזינו את שם המשפחה (למשל: כהן).'); return; }
     const cleanPin = pin.trim();
     if (cleanPin && !/^\d{4}$/.test(cleanPin)) { setCreateError('סיסמת ההורה חייבת להיות בדיוק 4 ספרות — או להשאיר את השדה ריק.'); return; }
     for (const d of drafts) {
@@ -279,7 +279,7 @@ export function FamilySetup() {
                 className={inputCls}
                 value={familyName}
                 onChange={(e) => setFamilyName(e.target.value)}
-                placeholder="למשל: לוי"
+                placeholder="למשל: כהן"
                 maxLength={30}
               />
             </div>

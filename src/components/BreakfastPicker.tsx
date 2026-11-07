@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FIREBASE_API_KEY, FIREBASE_PROJECT_ID } from '../firebase';
 import { CHILDREN } from '../data/tasksData';
+import { getChildAge } from '../utils/date';
 
 // Breakfast pick for tomorrow. Opened from the mandatory evening task
 // "breakfast_choice"; the task can only be completed through onDone, which
@@ -60,7 +61,11 @@ export function BreakfastPicker({ childId, familyCode, onClose, onDone }: { chil
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
   const dateKey = keyOf(tomorrow);
   const dayName = DAY_NAMES[tomorrow.getDay()];
-  const needsLunch = childId === 'arava' && tomorrow.getDay() === 0;
+  // The oldest child also picks tomorrow's lunch when tomorrow is Sunday
+  // (i.e. this picker is opened on Motzei Shabbat) - roster-driven by age,
+  // not a hardcoded child id, so it works for every family.
+  const oldest = CHILDREN.length ? CHILDREN.reduce((a, b) => (getChildAge(b) > getChildAge(a) ? b : a)) : null;
+  const needsLunch = !!oldest && childId === oldest.id && tomorrow.getDay() === 0;
   const [veg, setVeg] = useState(''); const [fruit, setFruit] = useState('');
   const [bread, setBread] = useState(''); const [spreads, setSpreads] = useState<string[]>([]);
   const [lunch, setLunch] = useState(''); const [specialRequest, setSpecialRequest] = useState('');
