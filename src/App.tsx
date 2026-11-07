@@ -205,9 +205,9 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
   // Custom router state simulated
   const [isMashovScraping, setIsMashovScraping] = useState<boolean>(false);
   const [mashovHasHomeworkText, setMashovHomeworkText] = useState<Record<string, string>>({
-    arava: 'תרגילים 1-5 במתמטיקה עמ׳ 44',
-    hoshen: 'קריאת פרק ה׳ בתנ״ך והעתקת שאלות',
-    peer: 'אין שיעורי בית מיוחדים להיום 🌟',
+    noa: 'תרגילים 1-5 במתמטיקה עמ׳ 44',
+    michal: 'קריאת פרק ה׳ בתנ״ך והעתקת שאלות',
+    uri: 'אין שיעורי בית מיוחדים להיום 🌟',
   });
 
   // --- CAMERA OVERLAY & LIGHTBOX STATE ---
@@ -586,7 +586,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
   const activeChild = CHILDREN.find((c) => c.id === activeChildId)!;
   const currentTasks = tasks[activeChildId] || [];
 
-  // Text-to-speech for young children (Rafael age 5, Peer age 7)
+  // Text-to-speech for young children (Daniel age 5, Uri age 7)
   // Primary: /api/tts proxy → Google Translate TTS (works on all devices, no Hebrew voice needed)
   // Fallback: browser speechSynthesis
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -749,8 +749,9 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
       setTasks((prev) => {
         const updated = { ...prev };
         Object.keys(updated).forEach(childKey => {
+          const childObj = CHILDREN.find(c => c.id === childKey);
           updated[childKey] = updated[childKey].map(task => {
-            if (task.id === 'a3' && childKey !== 'rafael') {
+            if (task.id === 'a3' && (!childObj || getChildAge(childObj) >= 7)) {
               return { 
                 ...task, 
                 completed: false, 
@@ -1113,10 +1114,11 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
 
   const currentTimeOfDay = getCurrentTimeOfDay();
   const isFriday = new Date().getDay() === 5;
+  const isSaturday = new Date().getDay() === 6;
   const timeOfDayLabels: Record<TimeOfDay, { label: string; emoji: string; subtitle: string }> = {
     morning: { label: 'משימות בוקר', emoji: '🌅', subtitle: 'השכמה וארגון' },
     afternoon: { label: isFriday ? 'הכנות לשבת' : 'אחר הצהריים', emoji: isFriday ? '🕯️' : '🌞', subtitle: isFriday ? 'ערב שבת שלום!' : 'לימודים ומשימות' },
-    evening: { label: isFriday ? 'ערב שבת' : 'ערב ושינה', emoji: isFriday ? '✨' : '🌙', subtitle: isFriday ? 'התארגנות לשבת' : 'התארגנות לשינה' },
+    evening: { label: isSaturday ? 'מוצאי שבת' : isFriday ? 'ערב שבת' : 'ערב ושינה', emoji: isFriday ? '✨' : '🌙', subtitle: isSaturday ? 'סידור הבית והתארגנות לשבוע חדש' : isFriday ? 'התארגנות לשבת' : 'התארגנות לשינה' },
   };
 
   // Progress score per child for parent view
@@ -1200,7 +1202,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
 
           <div className="space-y-2">
             <p className="text-white/50 text-sm">האפליקציה תחזור לפעילות בצאת השבת</p>
-            <p className="text-white/30 text-xs">שבת שלום למשפחת הלל ומוריה 💛</p>
+            <p className="text-white/30 text-xs">שבת שלום למשפחה 💛</p>
           </div>
         </div>
       </div>
@@ -1316,7 +1318,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                   <div className="flex items-center gap-1.5">
                     <span className="text-lg font-bold text-[#4A4540]">{activeChild.name}</span>
                   </div>
-                  <p className="text-xs text-[#8C8479]">{activeChildId === 'arava' || activeChildId === 'hoshen' ? 'בת' : 'בן'} {getChildAge(activeChild)} | {getDayName()}</p>
+                  <p className="text-xs text-[#8C8479]">{activeChild.gender === 'female' ? 'בת' : 'בן'} {getChildAge(activeChild)} | {getDayName()}</p>
                 </div>
               </div>
 
@@ -1357,13 +1359,13 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                 <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-mono font-bold">LIVE</span>
               </div>
               <p className="text-xs text-[#5D544A] leading-relaxed">
-                מערכת ה-Mashov סורקת שיעורי בית מדי יום. לערבה וחושן עודכנו שיעורי בית.
+                מערכת ה-Mashov סורקת שיעורי בית מדי יום. ל{CHILDREN.slice(0, 2).map(c => c.name).join(' ו')} עודכנו שיעורי בית.
               </p>
               <div className="text-xs bg-white/70 p-2 rounded border border-[#E3DCD2]">
                 <strong className="text-xs block text-[#D35400]">שיעורי בית ל{activeChild.name}:</strong>
                 <p className="text-[11px] italic mt-0.5">
-                  {activeChildId === 'rafael' 
-                    ? 'פטור מגיל גן! יש להכין יצירה 🎨' 
+                  {getChildAge(activeChild) <= 6
+                    ? 'פטור מגיל גן! יש להכין יצירה 🎨'
                     : mashovHasHomeworkText[activeChildId] || 'אין שיעורי בית היום 😊'}
                 </p>
               </div>
@@ -1492,10 +1494,10 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
             {/* Help Block */}
             <div className="p-4 bg-[#8A9A5B]/10 rounded-2xl border border-[#8A9A5B]/20 text-center text-xs space-y-2">
               <p className="text-[#6A7B42] mb-0.5 font-bold">צריך עזרה עם המשימות?</p>
-              <p className="text-[#8A9A5B] text-[10px]">קראו לאבא הלל או אמא מוריה</p>
+              <p className="text-[#8A9A5B] text-[10px]">קראו לאבא או אמא</p>
               <button
                 onClick={() => {
-                  const audio = new Audio('/api/tts?text=' + encodeURIComponent('שלום רפאל, בדיקה אחת שתיים שלוש'));
+                  const audio = new Audio('/api/tts?text=' + encodeURIComponent(`שלום ${activeChild.name}, בדיקה אחת שתיים שלוש`));
                   audio.play().then(() => alert('הקול עובד! 🎉')).catch(e => alert('שגיאה: ' + e.message));
                 }}
                 className="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg text-[10px] font-bold transition-all"
@@ -1564,7 +1566,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                 <ShieldCheck className="w-5 h-5 shrink-0" />
                 <div>
                   <h4 className="text-xs font-bold">מורשה הורים: מחובר</h4>
-                  <p className="text-[10px] opacity-90">שלום אבא הלל / אמא מוריה</p>
+                  <p className="text-[10px] opacity-90">שלום אבא / אמא</p>
                 </div>
               </div>
 
@@ -1876,7 +1878,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-bold text-sm text-[#4A4540] truncate">{child.name}</h3>
                           <p className="text-[10px] text-[#8C8479]">
-                            {child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {getChildAge(child)}
+                            {child.gender === 'female' ? 'בת' : 'בן'} {getChildAge(child)}
                           </p>
                         </div>
                         <div className="text-center shrink-0">
@@ -1951,7 +1953,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                                   {task.photo && (
                                     <span className="text-[8px] font-bold text-green-600 bg-green-50 px-1 py-0.5 rounded">✓📸</span>
                                   )}
-                                  {child.id === 'rafael' && (
+                                  {getChildAge(child) <= 6 && (
                                     <span className="text-[8px] font-bold text-blue-600 bg-blue-50 px-1 py-0.5 rounded">🔊</span>
                                   )}
                                 </div>
@@ -2014,7 +2016,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                   
                   <div>
                     <h3 className="text-xl font-bold text-[#5D4037]">לוח בקרה למבוגרים בלבד</h3>
-                    <p className="text-xs text-[#8C8479] mt-1">אבא הלל ואמא מוריה - נא להקיש את קוד האימות שלכם</p>
+                    <p className="text-xs text-[#8C8479] mt-1">אבא ואמא - נא להקיש את קוד האימות שלכם</p>
                   </div>
 
                   <form onSubmit={handleParentAuth} className="space-y-4">
@@ -2051,7 +2053,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                   {/* Dynamic Parent Control Bar */}
                   <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-[#D6CFC4] shadow-sm">
                     <div>
-                      <h3 className="text-2xl font-bold text-[#5D4037]">👨‍👩‍👧‍👦 לוח הבקרה של הלל ומוריה</h3>
+                      <h3 className="text-2xl font-bold text-[#5D4037]">👨‍👩‍👧‍👦 לוח הבקרה של ההורים</h3>
                       <p className="text-sm text-[#8C8479]">מעקב התקדמות הילדים בזמן אמת, אישור משימות מרחוק ושליטה בזמן מסך</p>
                     </div>
                     
@@ -2540,7 +2542,7 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
                               <img src={child.photo} alt={child.name} className="w-8 h-8 rounded-full object-cover object-top border" style={{ borderColor: child.color }} />
                               <div>
                                 <h4 className="font-bold text-[#4A4540]">{child.name}</h4>
-                                <p className="text-[10px] text-[#8C8479]">{child.id === 'arava' || child.id === 'hoshen' ? 'בת' : 'בן'} {getChildAge(child)}</p>
+                                <p className="text-[10px] text-[#8C8479]">{child.gender === 'female' ? 'בת' : 'בן'} {getChildAge(child)}</p>
                               </div>
                             </div>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -3409,7 +3411,7 @@ function syncMashovToAppSheet() {
   if (hasHomework) {
     // Append homework task flag to google sheet
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Task_Logs");
-    sheet.appendRow([Utilities.getUuid(), new Date(), "arava", "homework_task", "פתוח"]);
+    sheet.appendRow([Utilities.getUuid(), new Date(), "noa", "homework_task", "פתוח"]);
   }
 }`}</pre>
                       </div>
@@ -3511,7 +3513,7 @@ function syncMashovToAppSheet() {
 
         {/* BOTTOM GLOBAL FOOTER */}
         <footer className="bg-[#E9E4DB] border-t border-[#D6CFC4] p-4 text-center text-xs text-[#8C8479] space-y-1">
-          <p className="font-bold text-[#5D544A]">&copy; 2026 אפליקציית ניהול משימות לטאבלטים - משפחת הלל ומוריה</p>
+          <p className="font-bold text-[#5D544A]">&copy; 2026 אפליקציית ניהול משימות לטאבלטים</p>
           <p className="text-[10px]">מערכת יציבה מבוססת Google Sheets + AppSheet + Google Apps Script + Docker Container Host</p>
         </footer>
 
