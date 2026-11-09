@@ -3,6 +3,7 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 import { useCloudSync } from './hooks/useCloudSync';
 import { useRewardsSync } from './hooks/useRewardsSync';
 import { useFindDevice } from './hooks/useFindDevice';
+import { useParentVoice } from './hooks/useParentVoice';
 import { EmojiConfettiBurst } from './components/EmojiConfettiBurst';
 import { BreakfastPicker } from './components/BreakfastPicker';
 import { isCurrentlyShabbat, getHebrewDate, getHebrewDayMonth, LOCATION } from './utils/hebrewDate';
@@ -505,6 +506,11 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
     setVolume: setFindDeviceVolume,
     sendError: findDeviceSendError,
   } = useFindDevice(familyCode, syncEnabled);
+
+  // Parent voice messages relayed into the family (recorded outside the
+  // app, e.g. as a WhatsApp voice note) - each device plays a new message
+  // once and shows a banner until it is heard; see hooks/useParentVoice.
+  const parentVoice = useParentVoice(familyCode, syncEnabled);
 
   const [currentDate, setCurrentDate] = useState<string>('');
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -1211,6 +1217,29 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-[#4A4540] font-sans selection:bg-[#E3DCD2] flex flex-col md:flex-row-reverse" dir="rtl">
+
+      {/* Parent voice message banner - a newly relayed recording auto-plays
+          when the browser allows it; otherwise the banner stays on top until
+          a kid taps play (the tap is a user gesture, so it always works). */}
+      {parentVoice.pending && (
+        <div className="fixed top-3 inset-x-3 z-[9998] flex justify-center pointer-events-none px-1">
+          <div className="pointer-events-auto bg-[#5D4037] text-white rounded-2xl px-5 py-4 shadow-2xl w-full max-w-sm text-center space-y-2.5">
+            <p className="text-base font-bold">🎧 הודעה קולית מההורים!</p>
+            <button
+              onClick={parentVoice.play}
+              className="w-full px-4 py-3 bg-[#8A9A5B] hover:bg-[#7A8A4B] text-white rounded-xl text-base font-bold transition-all"
+            >
+              {parentVoice.isPlaying ? '🔊 מתנגן...' : '▶️ שמעו את ההודעה'}
+            </button>
+            <button
+              onClick={parentVoice.dismiss}
+              className="w-full px-4 py-1 text-white/70 hover:text-white text-xs transition-all"
+            >
+              סגירה
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Find-the-tablet overlay - background flashes every 500ms while ringing, on top of whatever screen is currently showing.
           Every device that's part of the sync group rings, including the one that pressed the button, so this needs its own
