@@ -993,22 +993,35 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
 
   // --- CAMERA UTILITY STATES & METHODS ---
   const [cameraStreamActive, setCameraStreamActive] = useState<boolean>(false);
+  const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
   const [cameraPhotoFile, setCameraPhotoFile] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const startCameraStream = async () => {
+  const startCameraStream = async (facing: 'user' | 'environment' = cameraFacing) => {
     try {
       setCameraPhotoFile(null);
-      // Front camera (selfie-style, for the child photographing themselves
-      // doing the task) first, fall back to any camera if unavailable.
+      // Stop any running stream first (needed when switching cameras).
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      // Requested camera first: front ('user') is selfie-style, for the child
+      // photographing themselves doing the task; back ('environment') is for
+      // photographing the room/bed. Fall back to the other camera, then to
+      // any camera available.
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing } });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing === 'user' ? 'environment' : 'user' } });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
       }
       streamRef.current = stream;
+      setCameraFacing(facing);
       setCameraStreamActive(true);
       // Wait for next render so videoRef is mounted, then attach stream
       setTimeout(() => {
@@ -1021,6 +1034,10 @@ function AppMain({ familyData, userId, onSignOut }: AppProps = {}) {
       console.error('Error opening camera:', err);
       alert('גישה למצלמה נכשלה. ודאו שהרשאת המצלמה מופעלת בהגדרות הטאבלט.');
     }
+  };
+
+  const switchCamera = () => {
+    startCameraStream(cameraFacing === 'user' ? 'environment' : 'user');
   };
 
   const stopCameraStream = () => {
@@ -3608,7 +3625,7 @@ function syncMashovToAppSheet() {
 
                 {/* Corner watermarks */}
                 <div className="absolute bottom-2 right-2 bg-black/50 text-[9px] px-2 py-0.5 rounded text-white/80 font-mono">
-                  LIVE CAMERA COMPONENT
+                  {cameraStreamActive ? (cameraFacing === 'user' ? 'מצלמה קדמית' : 'מצלמה אחורית') : 'LIVE CAMERA COMPONENT'}
                 </div>
               </div>
 
@@ -3617,20 +3634,29 @@ function syncMashovToAppSheet() {
                 <div className="flex gap-2 justify-center">
                   {!cameraStreamActive ? (
                     <button
-                      onClick={startCameraStream}
+                      onClick={() => startCameraStream()}
                       className="px-4 py-2 bg-[#8A9A5B] hover:bg-[#6A7B42] text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 font-sans"
                     >
                       <Camera className="w-4 h-4" />
                       <span>הפעל מצלמת מכשיר</span>
                     </button>
                   ) : (
-                    <button
-                      onClick={capturePhotoFromStream}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 font-sans"
-                    >
-                      <div className="w-3 h-3 bg-white rounded-full animate-ping" />
-                      <span>צלם תמונה מהווידאו</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={capturePhotoFromStream}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 font-sans"
+                      >
+                        <div className="w-3 h-3 bg-white rounded-full animate-ping" />
+                        <span>צלם תמונה מהווידאו</span>
+                      </button>
+                      <button
+                        onClick={switchCamera}
+                        className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 font-sans"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        <span>החלף מצלמה</span>
+                      </button>
+                    </>
                   )}
 
 
