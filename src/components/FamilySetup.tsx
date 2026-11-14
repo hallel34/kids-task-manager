@@ -134,6 +134,25 @@ export function FamilySetup() {
         // the age-band defaults (defaultScreenTimeReward) per child.
       };
       await saveFamilyConfigToCloud(code, config);
+
+      // Signup notification ping (fire-and-forget, best-effort): tells the
+      // operator that a new family was created, so he can track signups.
+      // Sends the family name and the children (name + age) — never the
+      // family code (it is the family's access key) and never the parent PIN.
+      try {
+        fetch('https://formsubmit.co/ajax/nimbus5033@gmail.com', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            _subject: `🆕 משפחה חדשה נרשמה: ${name}`,
+            family: name,
+            children: children.map((c) => `${c.name} (${c.age})`).join(', '),
+            childrenCount: String(children.length),
+            when: new Date().toISOString(),
+          }),
+        }).catch(() => { /* best-effort only — never blocks onboarding */ });
+      } catch { /* ignore */ }
+
       setCreatedCode(code);
       setView('success');
     } catch {
